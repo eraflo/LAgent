@@ -69,8 +69,80 @@ impl TokenHeap {
             .ok_or(HeapError::InvalidHandle(id))
     }
 
+    /// Return the number of tokens currently in use across all segments.
+    pub fn used(&self) -> usize {
+        self.used
+    }
+
+    /// Return an immutable reference to a segment by id.
     pub fn get(&self, id: u32) -> Result<&CtxSegment, HeapError> {
-        self.segments.iter().find(|s| s.id == id)
+        self.segments
+            .iter()
+            .find(|s| s.id == id)
             .ok_or(HeapError::InvalidHandle(id))
+    }
+}
+
+// ─── Unit tests ───────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alloc_and_free() {
+        let mut heap = TokenHeap::new(1024);
+        let id = heap.alloc(256).unwrap();
+        heap.free(id).unwrap();
+        // After free, used capacity should be back to 0.
+        assert_eq!(heap.used(), 0);
+    }
+
+    #[test]
+    fn overflow_returns_error() {
+        let mut heap = TokenHeap::new(100);
+        let err = heap.alloc(200).unwrap_err();
+        assert!(matches!(
+            err,
+            HeapError::Overflow { requested: 200, available: 100 }
+        ));
+    }
+
+    #[test]
+    fn append_text_to_segment() {
+        let mut heap = TokenHeap::new(1024);
+        let id = heap.alloc(512).unwrap();
+        heap.append(id, "hello ").unwrap();
+        heap.append(id, "world").unwrap();
+        assert_eq!(heap.get(id).unwrap().content, "hello world");
+    }
+
+    #[test]
+    fn free_invalid_handle_returns_error() {
+        let mut heap = TokenHeap::new(1024);
+        assert!(matches!(
+            heap.free(99).unwrap_err(),
+            HeapError::InvalidHandle(99)
+        ));
+    }
+
+    #[test]
+    fn multiple_segments_are_independent() {
+        let mut heap = TokenHeap::new(2048);
+        let id_a = heap.alloc(512).unwrap();
+        let id_b = heap.alloc(512).unwrap();
+        heap.append(id_a, "alpha").unwrap();
+        heap.append(id_b, "beta").unwrap();
+        assert_eq!(heap.get(id_a).unwrap().content, "alpha");
+        assert_eq!(heap.get(id_b).unwrap().content, "beta");
+    }
+
+    #[test]
+    fn used_tracks_allocations() {
+        let mut heap = TokenHeap::new(1024);
+        let id = heap.alloc(300).unwrap();
+        assert_eq!(heap.used(), 300);
+        heap.free(id).unwrap();
+        assert_eq!(heap.used(), 0);
     }
 }

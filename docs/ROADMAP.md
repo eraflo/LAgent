@@ -29,6 +29,15 @@ Target: support for probabilistic branching, semantic types, and remote inferenc
 - [ ] `branch` / `case` / `default` syntax and semantics
 - [ ] `type Name = semantic(...)` declaration
 - [ ] Semantic type validation (embedding distance)
+- [ ] Agent vocabulary keywords : `soul`, `skill`, `instruction`, `spell`, `memory`, `oracle`, `constraint`, `lore`
+
+### Module System (linking & libraries)
+- [ ] Mot-clé `use` pour importer depuis un autre fichier `.la` : `use "path/to/module.la";`
+- [ ] Modificateur `pub` sur `fn`, `kernel`, `type`, `soul`, `skill` pour contrôler la visibilité
+- [ ] Résolution des chemins à la compilation (relatifs au `lagent.toml` ou au fichier source)
+- [ ] Déclaration de bibliothèque : section `[lib]` dans `lagent.toml` + entrée `lib = "src/lib.la"`
+- [ ] Compilation d'une lib vers un `.lalb` (L-Agent Library Bundle) : bytecode + table des exports
+- [ ] `lagent add <lib>` : installation depuis un registre (Phase 4)
 
 ### VM
 - [ ] `Branch` opcode with constrained decoding

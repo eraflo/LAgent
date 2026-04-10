@@ -10,6 +10,9 @@ license.workspace = true
 name = "lagent"
 path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 lagent-compiler = { path = "../lagent-compiler" }
 lagent-vm = { path = "../lagent-vm" }

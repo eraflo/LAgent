@@ -1,0 +1,32 @@
+//! Integration tests for the L-Agent compiler pipeline.
+
+use lagent_compiler::compile;
+
+/// An empty source file must compile without error.
+#[test]
+fn compiles_empty_source() {
+    assert!(compile("").is_ok());
+}
+
+/// The first 4 bytes of any compiled output must be the `LAGN` magic header.
+#[test]
+fn compile_produces_lagn_magic_header() {
+    let bytecode = compile("").expect("compilation failed");
+    assert!(
+        bytecode.len() >= 4,
+        "bytecode too short to contain magic header"
+    );
+    assert_eq!(&bytecode[0..4], b"LAGN", "missing LAGN magic header");
+}
+
+/// Whitespace-only source should behave identically to empty source.
+#[test]
+fn compiles_whitespace_only_source() {
+    assert!(compile("   \n\t  ").is_ok());
+}
+
+/// A line comment should not cause a compilation error.
+#[test]
+fn compiles_source_with_only_comments() {
+    assert!(compile("// this is a comment\n// another one").is_ok());
+}

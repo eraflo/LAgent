@@ -6,17 +6,24 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 bincode = "1"
 
+[dev-dependencies]
+lagent-compiler = { path = "../lagent-compiler" }
+
 [features]
 default = ["backend-simulated"]
 backend-simulated = []
 backend-remote = ["reqwest", "tokio"]
-backend-local-gguf = ["llama-cpp-bindings"]
+# backend-local-gguf requires the optional `llama-cpp-bindings` crate (added in Phase 1).
+backend-local-gguf = []
 
 [dependencies.reqwest]
 version = "0.12"
