@@ -1,0 +1,8 @@
+// Hello World in L-Agent
+
+fn main() {
+    let ctx = ctx_alloc(512);
+    ctx_append(ctx, "Hello, L-Agent!");
+    println("Hello, L-Agent!");
+    ctx_free(ctx);
+}

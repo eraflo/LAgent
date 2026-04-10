@@ -1,0 +1,29 @@
+[package]
+name = "lagent-vm"
+description = "L-Agent virtual machine and runtime: executes .lbc bytecode and manages inference backends"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+bincode = "1"
+
+[features]
+default = ["backend-simulated"]
+backend-simulated = []
+backend-remote = ["reqwest", "tokio"]
+backend-local-gguf = ["llama-cpp-bindings"]
+
+[dependencies.reqwest]
+version = "0.12"
+features = ["json"]
+optional = true
+
+[dependencies.tokio]
+version = "1"
+features = ["full"]
+optional = true

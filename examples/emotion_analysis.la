@@ -1,0 +1,30 @@
+// Emotion analysis example — demonstrates semantic types, kernels, and branch
+
+type Emotion = semantic("joie", "colère", "tristesse", "neutre");
+
+kernel AnalyserMessage(texte: str) -> Emotion {
+    observe(texte);
+    reason("Déterminer l'émotion dominante dans le texte");
+    let emotion: Emotion = infer(texte);
+    verify(emotion != "neutre");
+    return emotion;
+}
+
+fn main() {
+    let ctx = ctx_alloc(4096);
+    ctx_append(ctx, "Je suis très mécontent de ce service !");
+
+    branch intent {
+        case "angry" (confidence > 0.7) => {
+            println("Gestion de crise activée");
+        }
+        case "help" (confidence > 0.4) => {
+            println("Support standard");
+        }
+        default => {
+            println("Redirection vers un opérateur humain");
+        }
+    }
+
+    ctx_free(ctx);
+}

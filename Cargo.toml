@@ -1,0 +1,23 @@
+[workspace]
+members = [
+    "lagent-compiler",
+    "lagent-vm",
+    "lagent-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["L-Agent Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/lagent-lang/lagent"
+
+[workspace.dependencies]
+logos = "0.14"
+chumsky = "0.9"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+thiserror = "1"
+anyhow = "1"

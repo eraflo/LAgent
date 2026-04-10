@@ -1,0 +1,15 @@
+[package]
+name = "lagent-compiler"
+description = "L-Agent language compiler: lexer, parser, semantic analysis, and bytecode generation"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+logos = { workspace = true }
+chumsky = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+bincode = "1"

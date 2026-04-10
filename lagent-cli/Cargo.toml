@@ -1,0 +1,17 @@
+[package]
+name = "lagent"
+description = "L-Agent CLI: compile, run, and manage .la programs"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lagent"
+path = "src/main.rs"
+
+[dependencies]
+lagent-compiler = { path = "../lagent-compiler" }
+lagent-vm = { path = "../lagent-vm" }
+clap = { workspace = true }
+anyhow = { workspace = true }

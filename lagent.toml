@@ -1,0 +1,19 @@
+[project]
+name = "my-agent"
+version = "0.1.0"
+entry = "src/main.la"
+
+[models]
+default = "simulated"
+
+[models.local]
+path = "models/mistral-7b-q4.gguf"
+device = "cpu"
+
+[models.remote]
+provider = "anthropic"
+model = "claude-haiku-4-5-20251001"
+
+[compile]
+optimization = "cost"   # cost | precision | latency | local
+context_limit = 8192

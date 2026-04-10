@@ -1,0 +1,5 @@
+/target
+*.lbc
+.env
+.DS_Store
+Thumbs.db
