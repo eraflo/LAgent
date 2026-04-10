@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+//! Inference backend trait and built-in implementations.
+
 pub mod simulated;
 
 use anyhow::Result;

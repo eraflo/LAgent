@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+//! Abstract syntax tree node definitions for the L-Agent language.
+
 /// Top-level items in a .la source file
 #[derive(Debug, Clone)]
 pub enum Item {

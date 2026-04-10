@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+//! Simulated inference backend for deterministic testing without a real model.
+
 use super::InferenceBackend;
 use anyhow::Result;
 
@@ -9,7 +12,9 @@ pub struct SimulatedBackend {
 
 impl SimulatedBackend {
     pub fn new(fixed_response: impl Into<String>) -> Self {
-        Self { fixed_response: fixed_response.into() }
+        Self {
+            fixed_response: fixed_response.into(),
+        }
     }
 }
 
@@ -20,7 +25,11 @@ impl InferenceBackend for SimulatedBackend {
 
     fn classify(&self, _prompt: &str, labels: &[String]) -> Result<Vec<(String, f32)>> {
         // Return uniform distribution over labels
-        let weight = if labels.is_empty() { 0.0 } else { 1.0 / labels.len() as f32 };
+        let weight = if labels.is_empty() {
+            0.0
+        } else {
+            1.0 / labels.len() as f32
+        };
         Ok(labels.iter().map(|l| (l.clone(), weight)).collect())
     }
 }

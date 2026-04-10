@@ -1,7 +1,10 @@
-use serde::{Serialize, Deserialize};
+// SPDX-License-Identifier: Apache-2.0
+//! L-Agent bytecode instruction set and serialisable [`Bytecode`] container.
+
+use serde::{Deserialize, Serialize};
 
 /// L-Agent bytecode instruction set.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OpCode {
     /// Allocate a context segment of `tokens` tokens.
     CtxAlloc(u32),
@@ -24,14 +27,29 @@ pub enum OpCode {
     /// Call a kernel by index.
     CallKernel(u16),
 
-    /// Probabilistic branch: list of (label, confidence_threshold, jump_offset), default offset.
+    /// Probabilistic branch over inference output.
     Branch {
+        /// Per-case `(label, confidence_threshold, jump_offset)` triples.
         cases: Vec<(String, f32, u16)>,
+        /// Instruction offset to jump to when no case matches.
         default: u16,
     },
 
-    /// Perform local inference: dst_reg, model_reg, prompt_reg.
+    /// Perform local inference (`dst_reg` ← model at `model_reg` with prompt at `prompt_reg`).
     LocalInfer(u8, u8, u8),
+
+    // ── Stack-based local variable access (Phase 1) ────────────────────────
+    /// Pop value from stack and store it in a named local variable.
+    StoreLocal(String),
+    /// Push the value of a named local variable onto the stack.
+    LoadLocal(String),
+
+    // ── Stack-based context primitives (Phase 1) ───────────────────────────
+    /// Pop a context handle from the stack and free the segment.
+    CtxFreeStack,
+    /// Pop a string (top) then a context handle (next) and append the string
+    /// to the segment.
+    CtxAppendStack,
 
     /// Return from function.
     Return,
@@ -46,12 +64,17 @@ pub enum OpCode {
 /// A compiled L-Agent program: magic bytes + version + instructions.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Bytecode {
-    pub magic: [u8; 4],    // b"LAGN"
+    /// Magic header — always `b"LAGN"`.
+    pub magic: [u8; 4],
+    /// Bytecode format version.
     pub version: u16,
+    /// The instruction stream.
     pub instructions: Vec<OpCode>,
 }
 
 impl Bytecode {
+    /// Create a new [`Bytecode`] with the standard magic header and version 1.
+    #[must_use]
     pub fn new(instructions: Vec<OpCode>) -> Self {
         Self {
             magic: *b"LAGN",

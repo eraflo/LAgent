@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+//! Token-based context heap: analogous to `malloc`/`free` but for LLM context windows.
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -39,12 +42,19 @@ impl TokenHeap {
     pub fn alloc(&mut self, tokens: usize) -> Result<u32, HeapError> {
         let available = self.total_capacity.saturating_sub(self.used);
         if tokens > available {
-            return Err(HeapError::Overflow { requested: tokens, available });
+            return Err(HeapError::Overflow {
+                requested: tokens,
+                available,
+            });
         }
         let id = self.next_id;
         self.next_id += 1;
         self.used += tokens;
-        self.segments.push(CtxSegment { id, capacity: tokens, content: String::new() });
+        self.segments.push(CtxSegment {
+            id,
+            capacity: tokens,
+            content: String::new(),
+        });
         Ok(id)
     }
 
@@ -57,7 +67,10 @@ impl TokenHeap {
 
     /// Free a context segment (analogous to free).
     pub fn free(&mut self, id: u32) -> Result<(), HeapError> {
-        let pos = self.segments.iter().position(|s| s.id == id)
+        let pos = self
+            .segments
+            .iter()
+            .position(|s| s.id == id)
             .ok_or(HeapError::InvalidHandle(id))?;
         let seg = self.segments.remove(pos);
         self.used = self.used.saturating_sub(seg.capacity);
@@ -65,7 +78,9 @@ impl TokenHeap {
     }
 
     fn get_mut(&mut self, id: u32) -> Result<&mut CtxSegment, HeapError> {
-        self.segments.iter_mut().find(|s| s.id == id)
+        self.segments
+            .iter_mut()
+            .find(|s| s.id == id)
             .ok_or(HeapError::InvalidHandle(id))
     }
 
@@ -104,7 +119,10 @@ mod tests {
         let err = heap.alloc(200).unwrap_err();
         assert!(matches!(
             err,
-            HeapError::Overflow { requested: 200, available: 100 }
+            HeapError::Overflow {
+                requested: 200,
+                available: 100
+            }
         ));
     }
 

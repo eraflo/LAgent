@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 //! Lexer for the L-Agent language.
 //!
 //! Transforms raw `.la` source text into a flat sequence of [`Token`]s
@@ -175,7 +176,27 @@ pub enum Token {
 pub fn tokenize(source: &str) -> Result<Vec<Token>> {
     let lexer = Token::lexer(source);
     let tokens: std::result::Result<Vec<_>, _> = lexer.collect();
-    tokens.map_err(|_| anyhow::anyhow!("Lexer error: unrecognised token"))
+    tokens.map_err(|()| anyhow::anyhow!("Lexer error: unrecognised token"))
+}
+
+// ─── Hash / Eq impls ──────────────────────────────────────────────────────────
+// Required for chumsky's `Simple<Token>` error type.
+// f64 is normalised through its bit representation; NaN is impossible in
+// well-formed source code, so this is sound in practice.
+
+impl Eq for Token {}
+
+impl std::hash::Hash for Token {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Token::StringLit(s) | Token::Ident(s) => s.hash(state),
+            #[allow(clippy::cast_possible_truncation)]
+            Token::FloatLit(f) => f.to_bits().hash(state),
+            Token::IntLit(n) => n.hash(state),
+            _ => (),
+        }
+    }
 }
 
 // ─── Unit tests ───────────────────────────────────────────────────────────────
@@ -248,9 +269,6 @@ mod tests {
     #[test]
     fn skips_line_comments() {
         let tokens = tokenize("fn // this is a comment\nmain").unwrap();
-        assert_eq!(
-            tokens,
-            vec![Token::Fn, Token::Ident("main".to_string())]
-        );
+        assert_eq!(tokens, vec![Token::Fn, Token::Ident("main".to_string())]);
     }
 }

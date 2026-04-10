@@ -1,5 +1,11 @@
-use clap::{Parser, Subcommand};
+// SPDX-License-Identifier: Apache-2.0
+//! `lagent` command-line toolchain: build, run, and check `.la` source files.
+
+// Phase 1 — API documentation will be added progressively.
+#![allow(missing_docs)]
+
 use anyhow::Result;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -22,7 +28,12 @@ enum Command {
     Run {
         #[arg(help = "Source file (.la)")]
         input: PathBuf,
-        #[arg(short, long, default_value = "4096", help = "Context heap size in tokens")]
+        #[arg(
+            short,
+            long,
+            default_value = "4096",
+            help = "Context heap size in tokens"
+        )]
         context: usize,
     },
     /// Check a .la source file for errors without compiling
