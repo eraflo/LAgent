@@ -63,6 +63,63 @@ cargo test --workspace --all-features
   6. **Dispatch VM** dans `lagent-vm/src/vm.rs`
   7. **Tests** : unitaires inline + test d'intégration dans `tests/`
 
+## Branches & Release Flow
+
+### Branches
+
+| Branch    | Purpose                                  |
+|-----------|------------------------------------------|
+| `main`    | Production — always releasable           |
+| `develop` | Integration branch for in-progress work |
+| `feat/*`  | Feature branches, opened against `main` |
+| `fix/*`   | Bug fix branches                         |
+
+### Commit Message Convention
+
+All commits **must** follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+| Type       | Triggers version bump  | Example                              |
+|------------|------------------------|--------------------------------------|
+| `feat`     | minor (`0.x.0`)        | `feat: add soul keyword`             |
+| `fix`      | patch (`0.0.x`)        | `fix: ctx_free double-free crash`    |
+| `feat!` / `BREAKING CHANGE` | major (`x.0.0`) | `feat!: rename ctx_alloc to ctx_new` |
+| `perf`     | patch                  | `perf: reduce token heap alloc`      |
+| `docs`     | no bump                | `docs: update SPEC.md §8`            |
+| `refactor` | no bump                | `refactor: split lexer into modules` |
+| `test`     | no bump                | `test: add kernel verify unit tests` |
+| `ci`       | no bump                | `ci: pin rust to 1.78`               |
+| `chore`    | no bump                | `chore(deps): bump logos to 0.15`    |
+
+### Automated Release Process (release-plz)
+
+Releases are **fully automated** via [release-plz](https://release-plz.dev):
+
+```
+feat/fix commit merged to main
+        ↓
+release-plz analyses Conventional Commits
+        ↓
+Opens a "Release PR":  chore(release): v0.2.0
+  • Bumps version in Cargo.toml (workspace)
+  • Generates / updates CHANGELOG.md
+        ↓
+Merge the Release PR
+        ↓
+release-plz creates a git tag + GitHub Release
+  • Attaches cross-platform binaries (built by build-release.yml)
+  • (opt.) Publishes crates to crates.io
+```
+
+**You never manually bump versions or write changelog entries.**
+
 ## Reporting Issues
 
-Use GitHub Issues. For language design discussions, open a Discussion instead.
+Use GitHub Issues (use the provided templates). For language design discussions, open a **Discussion** instead.

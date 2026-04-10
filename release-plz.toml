@@ -1,0 +1,33 @@
+# release-plz configuration
+# Docs: https://release-plz.dev/docs/config
+
+[workspace]
+# Generate and update CHANGELOG.md on each release PR.
+changelog_update = true
+
+# Create a GitHub Release (tag + release notes) when a release PR is merged.
+git_release_enable = true
+
+# Do not publish as draft — releases are public immediately.
+git_release_draft = false
+
+# Publishing to crates.io is disabled until the project reaches a stable API.
+# Set to true and add CARGO_REGISTRY_TOKEN to repository secrets when ready.
+publish = false
+
+# Use our cliff.toml for changelog generation.
+changelog_config = "cliff.toml"
+
+# ── Per-package overrides ────────────────────────────────────────────────────
+
+# The CLI binary is the primary release artifact. Its changelog aggregates
+# commits from all three crates.
+[[package]]
+name = "lagent"
+changelog_include = ["lagent", "lagent-compiler", "lagent-vm"]
+
+[[package]]
+name = "lagent-compiler"
+
+[[package]]
+name = "lagent-vm"

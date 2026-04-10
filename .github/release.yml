@@ -1,0 +1,42 @@
+# GitHub auto-generated release notes categories.
+# Maps PR labels to sections in the "Releases" page.
+# Labels are applied automatically by GitHub based on the PR title prefix,
+# or manually by contributors.
+
+changelog:
+  categories:
+    - title: "⚠️ Breaking Changes"
+      labels:
+        - breaking-change
+    - title: "🚀 Features"
+      labels:
+        - feat
+        - feature
+        - enhancement
+    - title: "🐛 Bug Fixes"
+      labels:
+        - fix
+        - bug
+        - bugfix
+    - title: "⚡ Performance"
+      labels:
+        - perf
+        - performance
+    - title: "🔨 Refactor"
+      labels:
+        - refactor
+    - title: "📚 Documentation"
+      labels:
+        - docs
+        - documentation
+    - title: "🧪 Tests"
+      labels:
+        - test
+        - tests
+    - title: "🏗 CI/CD"
+      labels:
+        - ci
+        - build
+    - title: "🔧 Dependencies"
+      labels:
+        - dependencies

@@ -1,0 +1,68 @@
+name: Bug Report
+description: Report a bug in L-Agent (compiler, VM, or CLI)
+title: "fix: <short description>"
+labels: [bug, fix]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug!
+        Please fill in as much detail as possible.
+
+  - type: input
+    id: version
+    attributes:
+      label: L-Agent version
+      description: Output of `lagent --version`
+      placeholder: "lagent 0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Linux (x86_64)
+        - Linux (aarch64)
+        - Windows (x86_64)
+        - macOS (x86_64 Intel)
+        - macOS (aarch64 Apple Silicon)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: source
+    attributes:
+      label: Minimal reproducer (.la source)
+      description: The smallest `.la` program that triggers the bug.
+      render: la
+      placeholder: |
+        fn main() {
+            let ctx = ctx_alloc(512);
+            // ...
+        }
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      placeholder: "Should compile without error / Should output X"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Paste the full error output.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else that might be relevant (backtrace, related issues, …)

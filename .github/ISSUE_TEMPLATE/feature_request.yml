@@ -1,0 +1,58 @@
+name: Feature Request
+description: Propose a new language feature, compiler capability, or tooling improvement
+title: "feat: <short description>"
+labels: [feat, enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a new feature!
+        For language design discussions, consider opening a **Discussion** instead.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Language syntax / semantics
+        - Compiler (lexer / parser / semantic / codegen)
+        - Virtual Machine
+        - CLI tooling (lagent build / run / check)
+        - Standard library / built-ins
+        - LSP / editor integration
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem this feature solves
+      description: What is currently impossible or painful?
+      placeholder: "It is currently impossible to share a context segment between two agents because…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: |
+        Describe the feature. Include example `.la` syntax if applicable.
+      render: la
+      placeholder: |
+        // Proposed syntax:
+        let shared = ctx_share(ctx, other_agent);
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about and why you prefer your proposal.
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Links to prior art, related issues, relevant spec sections, …
