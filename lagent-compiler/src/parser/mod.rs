@@ -8,7 +8,10 @@ pub mod ast;
 
 use crate::lexer::Token;
 use anyhow::{anyhow, Result};
-use ast::{BinOp, Block, Expr, FnDef, Item, Param, PrimType, Stmt, TypeExpr};
+use ast::{
+    BinOp, Block, BranchCase, BranchStmt, Expr, FnDef, Item, KernelDef, Param, PrimType, Stmt,
+    TypeAlias, TypeExpr,
+};
 use chumsky::prelude::*;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -18,6 +21,28 @@ fn ident() -> impl Parser<Token, String, Error = Simple<Token>> {
     filter(|t| matches!(t, Token::Ident(_))).map(|t| {
         if let Token::Ident(s) = t {
             s
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+/// Accept an `Ident` token *or* the `intent` keyword token, yielding a String.
+/// Used in `branch <var>` where the subject may be a keyword like `intent`.
+fn name() -> impl Parser<Token, String, Error = Simple<Token>> {
+    filter(|t| matches!(t, Token::Ident(_) | Token::Intent)).map(|t| match t {
+        Token::Ident(s) => s,
+        Token::Intent => "intent".to_string(),
+        _ => unreachable!(),
+    })
+}
+
+// ── String literal helper ─────────────────────────────────────────────────────
+
+fn str_inner() -> impl Parser<Token, String, Error = Simple<Token>> {
+    filter(|t| matches!(t, Token::StringLit(_))).map(|t| {
+        if let Token::StringLit(s) = t {
+            s[1..s.len() - 1].to_string()
         } else {
             unreachable!()
         }
@@ -34,16 +59,9 @@ fn type_expr() -> impl Parser<Token, TypeExpr, Error = Simple<Token>> {
         .or(just(Token::F32Type).to(TypeExpr::Primitive(PrimType::F32)));
 
     // semantic("label1", "label2", …)
-    let str_inner = filter(|t| matches!(t, Token::StringLit(_))).map(|t| {
-        if let Token::StringLit(s) = t {
-            s[1..s.len() - 1].to_string()
-        } else {
-            unreachable!()
-        }
-    });
     let semantic = just(Token::Semantic)
         .ignore_then(
-            str_inner
+            str_inner()
                 .separated_by(just(Token::Comma))
                 .delimited_by(just(Token::LParen), just(Token::RParen)),
         )
@@ -56,13 +74,7 @@ fn type_expr() -> impl Parser<Token, TypeExpr, Error = Simple<Token>> {
 
 fn expr() -> impl Parser<Token, Expr, Error = Simple<Token>> {
     recursive(|expr| {
-        let str_lit = filter(|t| matches!(t, Token::StringLit(_))).map(|t| {
-            if let Token::StringLit(s) = t {
-                Expr::StringLit(s[1..s.len() - 1].to_string())
-            } else {
-                unreachable!()
-            }
-        });
+        let str_lit = str_inner().map(Expr::StringLit);
 
         let int_lit = filter(|t| matches!(t, Token::IntLit(_))).map(|t| {
             if let Token::IntLit(n) = t {
@@ -149,22 +161,85 @@ fn expr() -> impl Parser<Token, Expr, Error = Simple<Token>> {
 // ── Statements ────────────────────────────────────────────────────────────────
 
 fn stmt() -> impl Parser<Token, Stmt, Error = Simple<Token>> {
-    let let_stmt = just(Token::Let)
-        .ignore_then(ident())
-        .then(just(Token::Colon).ignore_then(type_expr()).or_not())
-        .then_ignore(just(Token::Assign))
-        .then(expr())
-        .then_ignore(just(Token::Semi))
-        .map(|((name, ty), val)| Stmt::Let(name, ty, val));
+    // Forward-declare so that block() can be used inside branch_stmt().
+    recursive(|stmt| {
+        let block_inner = stmt
+            .repeated()
+            .delimited_by(just(Token::LBrace), just(Token::RBrace));
 
-    let return_stmt = just(Token::Return)
-        .ignore_then(expr())
-        .then_ignore(just(Token::Semi))
-        .map(Stmt::Return);
+        let let_stmt = just(Token::Let)
+            .ignore_then(ident())
+            .then(just(Token::Colon).ignore_then(type_expr()).or_not())
+            .then_ignore(just(Token::Assign))
+            .then(expr())
+            .then_ignore(just(Token::Semi))
+            .map(|((name, ty), val)| Stmt::Let(name, ty, val));
 
-    let expr_stmt = expr().then_ignore(just(Token::Semi)).map(Stmt::Expr);
+        let return_stmt = just(Token::Return)
+            .ignore_then(expr())
+            .then_ignore(just(Token::Semi))
+            .map(Stmt::Return);
 
-    let_stmt.or(return_stmt).or(expr_stmt)
+        let expr_stmt = expr().then_ignore(just(Token::Semi)).map(Stmt::Expr);
+
+        // branch <name> { case "label" (confidence > N) => { ... } ... default => { ... } }
+        //
+        // Confidence expression: `confidence > 0.7` or `confidence > 1`
+        // We extract the threshold from either a FloatLit or an IntLit.
+        let threshold = filter(|t| matches!(t, Token::FloatLit(_))).map(|t| {
+            if let Token::FloatLit(f) = t {
+                f
+            } else {
+                unreachable!()
+            }
+        }).or(filter(|t| matches!(t, Token::IntLit(_))).map(|t| {
+            if let Token::IntLit(n) = t {
+                #[allow(clippy::cast_precision_loss)]
+                { n as f64 }
+            } else {
+                unreachable!()
+            }
+        }));
+
+        // (confidence > N) — we only care about the threshold value.
+        let confidence_guard = just(Token::LParen)
+            .ignore_then(
+                // "confidence" is tokenised as an Ident
+                ident()
+                    .ignore_then(just(Token::Gt).or(just(Token::Lt)))
+                    .ignore_then(threshold),
+            )
+            .then_ignore(just(Token::RParen));
+
+        let branch_case = just(Token::Case)
+            .ignore_then(str_inner())
+            .then(confidence_guard)
+            .then_ignore(just(Token::FatArrow))
+            .then(block_inner.clone())
+            .map(|((label, confidence), body)| BranchCase {
+                label,
+                confidence,
+                body,
+            });
+
+        let default_case = just(Token::Default)
+            .ignore_then(just(Token::FatArrow))
+            .ignore_then(block_inner.clone());
+
+        let branch_stmt = just(Token::Branch)
+            .ignore_then(name())
+            .then(
+                branch_case
+                    .repeated()
+                    .then(default_case.or_not())
+                    .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+            )
+            .map(|(var, (cases, default))| {
+                Stmt::Branch(BranchStmt { var, cases, default })
+            });
+
+        let_stmt.or(return_stmt).or(branch_stmt).or(expr_stmt)
+    })
 }
 
 fn block() -> impl Parser<Token, Block, Error = Simple<Token>> {
@@ -208,8 +283,38 @@ fn fn_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
         })
 }
 
+fn kernel_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Kernel)
+        .ignore_then(ident())
+        .then(params())
+        .then_ignore(just(Token::Arrow))
+        .then(type_expr())
+        .then(block())
+        .map(|(((name, params), return_type), body)| {
+            Item::KernelDef(KernelDef {
+                name,
+                params,
+                return_type,
+                body,
+            })
+        })
+}
+
+fn type_alias() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Type)
+        .ignore_then(ident())
+        .then_ignore(just(Token::Assign))
+        .then(type_expr())
+        .then_ignore(just(Token::Semi))
+        .map(|(name, def)| Item::TypeAlias(TypeAlias { name, def }))
+}
+
 fn program() -> impl Parser<Token, Vec<Item>, Error = Simple<Token>> {
-    fn_def().repeated().then_ignore(end())
+    type_alias()
+        .or(kernel_def())
+        .or(fn_def())
+        .repeated()
+        .then_ignore(end())
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -289,5 +394,101 @@ fn main() {
         } else {
             panic!("expected FnDef");
         }
+    }
+
+    #[test]
+    fn parses_type_alias() {
+        let src = r#"type Emotion = semantic("joie", "colère", "tristesse", "neutre");"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 1);
+        if let Item::TypeAlias(ta) = &items[0] {
+            assert_eq!(ta.name, "Emotion");
+            if let TypeExpr::Semantic(labels) = &ta.def {
+                assert_eq!(labels.len(), 4);
+            } else {
+                panic!("expected Semantic type");
+            }
+        } else {
+            panic!("expected TypeAlias");
+        }
+    }
+
+    #[test]
+    fn parses_kernel_def() {
+        let src = r#"kernel Foo(x: str) -> str { return x; }"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(matches!(&items[0], Item::KernelDef(_)));
+    }
+
+    #[test]
+    fn parses_branch_stmt() {
+        let src = r#"
+fn main() {
+    branch intent {
+        case "angry" (confidence > 0.7) => {
+            println("crise");
+        }
+        case "help" (confidence > 0.4) => {
+            println("support");
+        }
+        default => {
+            println("operateur");
+        }
+    }
+}
+"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 1);
+        if let Item::FnDef(f) = &items[0] {
+            assert_eq!(f.body.len(), 1);
+            assert!(matches!(&f.body[0], Stmt::Branch(_)));
+        } else {
+            panic!("expected FnDef");
+        }
+    }
+
+    #[test]
+    fn parses_emotion_analysis() {
+        let src = r#"
+type Emotion = semantic("joie", "colère", "tristesse", "neutre");
+
+kernel AnalyserMessage(texte: str) -> Emotion {
+    observe(texte);
+    reason("Déterminer l'émotion dominante dans le texte");
+    let emotion: Emotion = infer(texte);
+    verify(emotion != "neutre");
+    return emotion;
+}
+
+fn main() {
+    let ctx = ctx_alloc(4096);
+    ctx_append(ctx, "Je suis très mécontent de ce service !");
+
+    branch intent {
+        case "angry" (confidence > 0.7) => {
+            println("Gestion de crise activée");
+        }
+        case "help" (confidence > 0.4) => {
+            println("Support standard");
+        }
+        default => {
+            println("Redirection vers un opérateur humain");
+        }
+    }
+
+    ctx_free(ctx);
+}
+"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        // TypeAlias, KernelDef, FnDef
+        assert_eq!(items.len(), 3);
+        assert!(matches!(&items[0], Item::TypeAlias(_)));
+        assert!(matches!(&items[1], Item::KernelDef(_)));
+        assert!(matches!(&items[2], Item::FnDef(_)));
     }
 }

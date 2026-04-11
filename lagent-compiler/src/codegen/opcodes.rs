@@ -51,6 +51,29 @@ pub enum OpCode {
     /// to the segment.
     CtxAppendStack,
 
+    // ── Phase 2: probabilistic branching ──────────────────────────────────
+    /// Interpreter-style probabilistic branch.
+    ///
+    /// The VM calls `backend.classify(var, labels)`, then executes the first
+    /// case body whose label has confidence ≥ its threshold, or `default`.
+    BranchClassify {
+        /// Local variable name or built-in (e.g. `"intent"`) to classify.
+        var: String,
+        /// `(label, confidence_threshold, body_instructions)` triples checked in order.
+        cases: Vec<(String, f32, Vec<OpCode>)>,
+        /// Body to execute when no case matches.
+        default: Vec<OpCode>,
+    },
+
+    // ── Phase 2: kernel primitives ─────────────────────────────────────────
+    /// Pop a string from the stack and append it to the kernel's context buffer.
+    Observe,
+    /// Log a reasoning annotation string (no-op in simulated backend).
+    Reason(String),
+    /// Classify the top-of-stack prompt against `labels` using the inference
+    /// backend; push the winning label as a [`Value::Str`].
+    InferClassify(Vec<String>),
+
     /// Return from function.
     Return,
 
