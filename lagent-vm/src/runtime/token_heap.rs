@@ -77,6 +77,7 @@ impl TokenHeap {
         Ok(())
     }
 
+    /// Return a mutable reference to a segment by id.
     fn get_mut(&mut self, id: u32) -> Result<&mut CtxSegment, HeapError> {
         self.segments
             .iter_mut()
