@@ -20,9 +20,11 @@ pub fn generate(ast: TypedAst) -> Result<Vec<u8>> {
         match item {
             Item::FnDef(f) => {
                 gen.emit_block(&f.body)?;
-                // Every function ends with Halt (Phase 1: no call frames yet).
+                // Every function ends with Halt (Phase 1/2: no call frames yet).
                 gen.emit(OpCode::Halt);
             }
+            // KernelDef and TypeAlias are parsed and type-checked but not yet
+            // lowered to a callable — proper call frames come in Phase 3.
             Item::KernelDef(_) | Item::TypeAlias(_) => {}
         }
     }
@@ -68,11 +70,42 @@ impl Codegen {
                 self.emit_expr(expr)?;
                 self.emit(OpCode::Return);
             }
-            Stmt::Branch(_) => {
-                // Phase 2 — not yet implemented.
+            Stmt::Branch(b) => {
+                // Collect all unique labels from cases for classify call.
+                let labels: Vec<String> = b.cases.iter().map(|c| c.label.clone()).collect();
+
+                // Compile each case body independently.
+                let mut case_ops = Vec::new();
+                for case in &b.cases {
+                    let body = self.compile_block(&case.body)?;
+                    #[allow(clippy::cast_possible_truncation)]
+                    case_ops.push((case.label.clone(), case.confidence as f32, body));
+                }
+
+                let default_ops = match &b.default {
+                    Some(block) => self.compile_block(block)?,
+                    None => vec![],
+                };
+
+                // Emit InferClassify first so the VM has a result label on the stack,
+                // then BranchClassify dispatches based on that result.
+                self.emit(OpCode::InferClassify(labels));
+                self.emit(OpCode::BranchClassify {
+                    var: b.var.clone(),
+                    cases: case_ops,
+                    default: default_ops,
+                });
             }
         }
         Ok(())
+    }
+
+    /// Compile a block into a standalone instruction sequence without touching `self.ops`.
+    fn compile_block(&mut self, block: &[Stmt]) -> Result<Vec<OpCode>> {
+        let saved = std::mem::take(&mut self.ops);
+        self.emit_block(block)?;
+        let result = std::mem::replace(&mut self.ops, saved);
+        Ok(result)
     }
 
     fn emit_expr(&mut self, expr: &Expr) -> Result<()> {
@@ -127,6 +160,32 @@ impl Codegen {
             "println" => {
                 self.emit_expr(arg(args, 0, "println")?)?;
                 self.emit(OpCode::Println);
+            }
+
+            // observe(value) — push value then Observe
+            "observe" => {
+                self.emit_expr(arg(args, 0, "observe")?)?;
+                self.emit(OpCode::Observe);
+            }
+
+            // reason("annotation") — emit Reason with string literal
+            "reason" => match arg(args, 0, "reason")? {
+                Expr::StringLit(s) => self.emit(OpCode::Reason(s.clone())),
+                other => {
+                    self.emit_expr(other)?;
+                    self.emit(OpCode::Reason(String::new()));
+                }
+            },
+
+            // infer(value) — push value then InferClassify (labels resolved at branch)
+            "infer" => {
+                self.emit_expr(arg(args, 0, "infer")?)?;
+                self.emit(OpCode::InferClassify(vec![]));
+            }
+
+            // verify(expr) — evaluate for side-effects, result discarded
+            "verify" => {
+                self.emit_expr(arg(args, 0, "verify")?)?;
             }
 
             // Generic user-defined function call.

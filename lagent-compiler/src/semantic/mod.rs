@@ -92,6 +92,8 @@ fn is_builtin(name: &str) -> bool {
             | "act"
             | "verify"
             | "infer"
+            // built-in branch subjects
+            | "intent"
     )
 }
 

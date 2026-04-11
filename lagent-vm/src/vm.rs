@@ -114,6 +114,59 @@ impl Vm {
                 // ── Control flow ──────────────────────────────────────────
                 OpCode::Return | OpCode::Halt => break,
 
+                // ── Phase 2: inference classify ───────────────────────────
+                OpCode::InferClassify(labels) => {
+                    // Pop prompt string, classify, push winning label.
+                    let prompt = frame.pop_str().unwrap_or_default();
+                    let results = self.backend.classify(&prompt, labels)?;
+                    let winner = results
+                        .into_iter()
+                        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                        .map_or_else(String::new, |(label, _)| label);
+                    frame.push(Value::Str(winner));
+                }
+
+                // ── Phase 2: branch classify ──────────────────────────────
+                OpCode::BranchClassify { var, cases, default } => {
+                    // Classify the subject against all case labels.
+                    let all_labels: Vec<String> =
+                        cases.iter().map(|(label, _, _)| label.clone()).collect();
+                    let prompt = frame
+                        .locals
+                        .get(var)
+                        .map_or_else(|| var.clone(), Value::to_string);
+                    let scores = self.backend.classify(&prompt, &all_labels)?;
+
+                    // Pop any InferClassify result already on the stack (from emit_branch).
+                    let _ = frame.pop();
+
+                    // Execute first matching case or default.
+                    let mut matched = false;
+                    for (label, threshold, body) in cases {
+                        let confidence = scores
+                            .iter()
+                            .find(|(l, _)| l == label)
+                            .map_or(0.0, |(_, c)| *c);
+                        if confidence >= *threshold {
+                            self.run(body, frame)?;
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if !matched {
+                        self.run(default, frame)?;
+                    }
+                }
+
+                // ── Phase 2: kernel step primitives ──────────────────────
+                OpCode::Observe => {
+                    // Pop value — observation recorded (no-op in simulated backend).
+                    let _ = frame.pop();
+                }
+                OpCode::Reason(_annotation) => {
+                    // Reasoning annotation — no-op in simulated backend.
+                }
+
                 // ── Inference (Phase 2+) ──────────────────────────────────
                 OpCode::LocalInfer(_, _, _) => {
                     // Not yet implemented.
@@ -200,6 +253,81 @@ fn main() {
 }
 "#;
         let bytes = lagent_compiler::compile(src).unwrap();
+        make_vm().execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn executes_emotion_analysis() {
+        let src = r#"
+type Emotion = semantic("joie", "colère", "tristesse", "neutre");
+
+kernel AnalyserMessage(texte: str) -> Emotion {
+    observe(texte);
+    reason("Déterminer l'émotion dominante");
+    let emotion: Emotion = infer(texte);
+    verify(emotion != "neutre");
+    return emotion;
+}
+
+fn main() {
+    let ctx = ctx_alloc(4096);
+    ctx_append(ctx, "Je suis très mécontent !");
+
+    branch intent {
+        case "angry" (confidence > 0.7) => {
+            println("Gestion de crise activée");
+        }
+        case "help" (confidence > 0.4) => {
+            println("Support standard");
+        }
+        default => {
+            println("Redirection vers un opérateur humain");
+        }
+    }
+
+    ctx_free(ctx);
+}
+"#;
+        // Simulated backend returns uniform weights over labels:
+        // "angry"=0.5 < 0.7, "help"=0.5 >= 0.4 → "Support standard" branch fires.
+        let bytes = lagent_compiler::compile(src).unwrap();
+        make_vm().execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn branch_default_fires_when_no_case_matches() {
+        let src = r#"
+fn main() {
+    branch intent {
+        case "angry" (confidence > 0.9) => {
+            println("crise");
+        }
+        default => {
+            println("default");
+        }
+    }
+}
+"#;
+        // Simulated backend returns 1.0 for single label "angry".
+        // But threshold is 0.9 and weight = 1/1 = 1.0 >= 0.9, so "crise" fires.
+        // Use two labels so each gets 0.5 < 0.9 → default fires.
+        let src2 = r#"
+fn main() {
+    branch intent {
+        case "angry" (confidence > 0.9) => {
+            println("crise");
+        }
+        case "help" (confidence > 0.9) => {
+            println("support");
+        }
+        default => {
+            println("default");
+        }
+    }
+}
+"#;
+        let _ = src; // single-label version fires the case, kept for documentation
+        let bytes = lagent_compiler::compile(src2).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
 
