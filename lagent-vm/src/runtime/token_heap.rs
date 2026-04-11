@@ -97,6 +97,17 @@ impl TokenHeap {
             .find(|s| s.id == id)
             .ok_or(HeapError::InvalidHandle(id))
     }
+
+    /// Return a clone of the text content of a segment.
+    pub fn get_content(&self, id: u32) -> Result<String, HeapError> {
+        Ok(self.get(id)?.content.clone())
+    }
+
+    /// Replace the text content of a segment (capacity and used-token count unchanged).
+    pub fn set_content(&mut self, id: u32, content: String) -> Result<(), HeapError> {
+        self.get_mut(id)?.content = content;
+        Ok(())
+    }
 }
 
 // ─── Unit tests ───────────────────────────────────────────────────────────────

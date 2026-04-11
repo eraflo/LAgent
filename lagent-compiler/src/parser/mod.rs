@@ -105,6 +105,7 @@ fn expr() -> impl Parser<Token, Expr, Error = Simple<Token>> {
                     | Token::CtxFree
                     | Token::CtxAppend
                     | Token::CtxResize
+                    | Token::CtxCompress
                     | Token::Observe
                     | Token::Reason
                     | Token::Act
@@ -118,6 +119,7 @@ fn expr() -> impl Parser<Token, Expr, Error = Simple<Token>> {
             Token::CtxFree => "ctx_free".to_string(),
             Token::CtxAppend => "ctx_append".to_string(),
             Token::CtxResize => "ctx_resize".to_string(),
+            Token::CtxCompress => "ctx_compress".to_string(),
             Token::Observe => "observe".to_string(),
             Token::Reason => "reason".to_string(),
             Token::Act => "act".to_string(),
@@ -238,7 +240,15 @@ fn stmt() -> impl Parser<Token, Stmt, Error = Simple<Token>> {
                 Stmt::Branch(BranchStmt { var, cases, default })
             });
 
-        let_stmt.or(return_stmt).or(branch_stmt).or(expr_stmt)
+        let interruptible_stmt = just(Token::Interruptible)
+            .ignore_then(block_inner.clone())
+            .map(Stmt::Interruptible);
+
+        let_stmt
+            .or(return_stmt)
+            .or(branch_stmt)
+            .or(interruptible_stmt)
+            .or(expr_stmt)
     })
 }
 

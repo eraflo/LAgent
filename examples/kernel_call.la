@@ -1,0 +1,25 @@
+// Kernel call example — demonstrates callable kernels, verify retry, and interruptible blocks
+
+type Sentiment = semantic("positive", "negative", "neutral");
+
+kernel AnalyseSentiment(text: str) -> Sentiment {
+    observe(text);
+    reason("Classify the sentiment of the input text");
+    let result: Sentiment = infer(text);
+    verify(result != "");
+    return result;
+}
+
+fn main() {
+    let ctx = ctx_alloc(1024);
+    ctx_append(ctx, "This product is absolutely fantastic!");
+
+    let sentiment = AnalyseSentiment(ctx);
+
+    interruptible {
+        println(sentiment);
+    }
+
+    ctx_compress(ctx);
+    ctx_free(ctx);
+}

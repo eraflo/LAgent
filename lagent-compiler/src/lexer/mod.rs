@@ -25,6 +25,9 @@ pub enum Token {
     Default,
     #[token("return")]
     Return,
+    /// Marks a block as interruptible (Safe Interaction Point).
+    #[token("interruptible")]
+    Interruptible,
 
     // ── Declaration keywords ───────────────────────────────────────────────
     #[token("type")]
@@ -83,6 +86,9 @@ pub enum Token {
     CtxAppend,
     #[token("ctx_resize")]
     CtxResize,
+    /// Summarise a context segment to reclaim token budget.
+    #[token("ctx_compress")]
+    CtxCompress,
 
     // ── Local model primitives ─────────────────────────────────────────────
     #[token("local_model_load")]

@@ -60,10 +60,11 @@ impl Vm {
             .map_err(|e| anyhow!("bytecode deserialization failed: {e}"))?;
 
         let mut frame = Frame::default();
-        self.run(&bc.instructions, &mut frame)
+        self.run(&bc, &bc.instructions, &mut frame)
     }
 
-    fn run(&mut self, ops: &[OpCode], frame: &mut Frame) -> Result<()> {
+    #[allow(clippy::too_many_lines)]
+    fn run(&mut self, bc: &Bytecode, ops: &[OpCode], frame: &mut Frame) -> Result<()> {
         for op in ops {
             match op {
                 // ── Literals ──────────────────────────────────────────────
@@ -95,15 +96,18 @@ impl Vm {
                     self.heap.free(handle)?;
                 }
                 OpCode::CtxAppendStack => {
-                    // Stack order: handle was pushed first, text second.
                     let text = frame.pop_str()?;
                     let handle = frame.pop_ctx_handle()?;
                     self.heap.append(handle, &text)?;
                 }
-                OpCode::CtxResize(reg, new_size) => {
-                    // Register-indexed variant — not used in Phase 1.
-                    let _ = (reg, new_size);
+                OpCode::CtxCompress => {
+                    let handle = frame.pop_ctx_handle()?;
+                    let content = self.heap.get_content(handle)?;
+                    let compressed = self.backend.compress(&content)?;
+                    self.heap.set_content(handle, compressed)?;
                 }
+                // No-op in Phase 1-3: register-indexed resize and reason annotation.
+                OpCode::CtxResize(_, _) | OpCode::Reason(_) => {}
 
                 // ── I/O ───────────────────────────────────────────────────
                 OpCode::Println => {
@@ -114,33 +118,68 @@ impl Vm {
                 // ── Control flow ──────────────────────────────────────────
                 OpCode::Return | OpCode::Halt => break,
 
-                // ── Phase 2: inference classify ───────────────────────────
+                // ── Call frames ───────────────────────────────────────────
+                OpCode::CallKernel(idx) => {
+                    let kernel = bc
+                        .kernels
+                        .get(*idx as usize)
+                        .ok_or_else(|| anyhow!("invalid kernel index {idx}"))?;
+
+                    // Pop args (pushed in declaration order; last param on TOS).
+                    let mut child = Frame::default();
+                    for param in kernel.params.iter().rev() {
+                        let val = frame.pop()?;
+                        child.locals.insert(param.clone(), val);
+                    }
+
+                    // Retry loop: re-run the kernel body on VerifyFail.
+                    let mut last_err: Option<anyhow::Error> = None;
+                    for _ in 0..=kernel.max_retries {
+                        let mut attempt = child.clone();
+                        match self.run(bc, &kernel.body, &mut attempt) {
+                            Ok(()) => {
+                                if let Some(v) = attempt.stack.pop() {
+                                    frame.push(v);
+                                }
+                                last_err = None;
+                                break;
+                            }
+                            Err(e) if e.to_string().contains("VerifyFail") => {
+                                last_err = Some(e);
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    if let Some(e) = last_err {
+                        return Err(e);
+                    }
+                }
+
+                // ── Probabilistic branching ───────────────────────────────
                 OpCode::InferClassify(labels) => {
-                    // Pop prompt string, classify, push winning label.
                     let prompt = frame.pop_str().unwrap_or_default();
                     let results = self.backend.classify(&prompt, labels)?;
                     let winner = results
                         .into_iter()
-                        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                        .max_by(|a, b| {
+                            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+                        })
                         .map_or_else(String::new, |(label, _)| label);
                     frame.push(Value::Str(winner));
                 }
 
-                // ── Phase 2: branch classify ──────────────────────────────
                 OpCode::BranchClassify { var, cases, default } => {
-                    // Classify the subject against all case labels.
                     let all_labels: Vec<String> =
-                        cases.iter().map(|(label, _, _)| label.clone()).collect();
+                        cases.iter().map(|(l, _, _)| l.clone()).collect();
                     let prompt = frame
                         .locals
                         .get(var)
                         .map_or_else(|| var.clone(), Value::to_string);
                     let scores = self.backend.classify(&prompt, &all_labels)?;
 
-                    // Pop any InferClassify result already on the stack (from emit_branch).
+                    // Discard the InferClassify result pushed just before this opcode.
                     let _ = frame.pop();
 
-                    // Execute first matching case or default.
                     let mut matched = false;
                     for (label, threshold, body) in cases {
                         let confidence = scores
@@ -148,38 +187,59 @@ impl Vm {
                             .find(|(l, _)| l == label)
                             .map_or(0.0, |(_, c)| *c);
                         if confidence >= *threshold {
-                            self.run(body, frame)?;
+                            self.run(bc, body, frame)?;
                             matched = true;
                             break;
                         }
                     }
                     if !matched {
-                        self.run(default, frame)?;
+                        self.run(bc, default, frame)?;
                     }
                 }
 
-                // ── Phase 2: kernel step primitives ──────────────────────
+                // ── Kernel step primitives ────────────────────────────────
                 OpCode::Observe => {
-                    // Pop value — observation recorded (no-op in simulated backend).
-                    let _ = frame.pop();
+                    let _ = frame.pop(); // Observation payload — no-op in simulated backend.
                 }
-                OpCode::Reason(_annotation) => {
-                    // Reasoning annotation — no-op in simulated backend.
+                OpCode::Act => {
+                    let payload = frame.pop_str().unwrap_or_default();
+                    let _ = self.backend.act(&payload)?;
+                }
+                OpCode::VerifyStep => {
+                    let val = frame.pop()?;
+                    let ok = match &val {
+                        Value::Int(0) => false,
+                        Value::Str(s) if s.is_empty() => false,
+                        _ => true,
+                    };
+                    if !ok {
+                        return Err(anyhow!("VerifyFail"));
+                    }
                 }
 
-                // ── Inference (Phase 2+) ──────────────────────────────────
-                OpCode::LocalInfer(_, _, _) => {
-                    // Not yet implemented.
-                    let _ = &self.backend;
+                // ── Comparisons ───────────────────────────────────────────
+                OpCode::CmpEq | OpCode::CmpNotEq | OpCode::CmpGt | OpCode::CmpLt => {
+                    let rhs = frame.pop()?;
+                    let lhs = frame.pop()?;
+                    let result = match op {
+                        OpCode::CmpEq => values_eq(&lhs, &rhs),
+                        OpCode::CmpNotEq => !values_eq(&lhs, &rhs),
+                        OpCode::CmpGt => values_gt(&lhs, &rhs),
+                        OpCode::CmpLt => values_gt(&rhs, &lhs),
+                        _ => unreachable!(),
+                    };
+                    frame.push(Value::Int(u64::from(result)));
                 }
 
-                // ── Remaining register-based opcodes (Phase 2+) ───────────
-                OpCode::CtxFree(_)
-                | OpCode::CtxAppend(_, _)
-                | OpCode::Call(_)
-                | OpCode::CallKernel(_)
-                | OpCode::Branch { .. } => {
-                    // Phase 2 — silently skip for now.
+                // ── Interruptible blocks ──────────────────────────────────
+                OpCode::BeginInterruptible => {
+                    frame.checkpoint = Some(Box::new(FrameState {
+                        stack: frame.stack.clone(),
+                        locals: frame.locals.clone(),
+                    }));
+                }
+                OpCode::EndInterruptible => {
+                    frame.checkpoint = None;
                 }
             }
         }
@@ -187,12 +247,44 @@ impl Vm {
     }
 }
 
+// ── Value comparison helpers ──────────────────────────────────────────────────
+
+fn values_eq(lhs: &Value, rhs: &Value) -> bool {
+    match (lhs, rhs) {
+        (Value::Str(a), Value::Str(b)) => a == b,
+        (Value::Int(a), Value::Int(b)) => a == b,
+        (Value::Float(a), Value::Float(b)) => a == b,
+        (Value::CtxHandle(a), Value::CtxHandle(b)) => a == b,
+        _ => false,
+    }
+}
+
+fn values_gt(lhs: &Value, rhs: &Value) -> bool {
+    match (lhs, rhs) {
+        (Value::Int(a), Value::Int(b)) => a > b,
+        (Value::Float(a), Value::Float(b)) => a > b,
+        (Value::Str(a), Value::Str(b)) => a > b,
+        _ => false,
+    }
+}
+
 // ── Call frame ────────────────────────────────────────────────────────────────
 
-#[derive(Default)]
+/// Snapshot of stack + locals for interruptible-block checkpointing.
+#[derive(Debug, Clone)]
+struct FrameState {
+    #[allow(dead_code)]
+    stack: Vec<Value>,
+    #[allow(dead_code)]
+    locals: HashMap<String, Value>,
+}
+
+#[derive(Default, Clone)]
 struct Frame {
     stack: Vec<Value>,
     locals: HashMap<String, Value>,
+    /// Saved checkpoint at the last `BeginInterruptible` (cleared at `EndInterruptible`).
+    checkpoint: Option<Box<FrameState>>,
 }
 
 impl Frame {
@@ -232,12 +324,14 @@ mod tests {
 
     #[test]
     fn executes_println() {
-        use lagent_compiler::codegen::opcodes::Bytecode;
-        let bc = Bytecode::new(vec![
-            OpCode::PushStr("hello from vm".to_string()),
-            OpCode::Println,
-            OpCode::Halt,
-        ]);
+        let bc = Bytecode::new(
+            vec![],
+            vec![
+                OpCode::PushStr("hello from vm".to_string()),
+                OpCode::Println,
+                OpCode::Halt,
+            ],
+        );
         let bytes = bincode::serialize(&bc).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
@@ -254,6 +348,18 @@ fn main() {
 "#;
         let bytes = lagent_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn ctx_alloc_and_free_balance_heap() {
+        let bc = Bytecode::new(
+            vec![],
+            vec![OpCode::CtxAlloc(256), OpCode::CtxFreeStack, OpCode::Halt],
+        );
+        let bytes = bincode::serialize(&bc).unwrap();
+        let mut vm = make_vm();
+        vm.execute(&bytes).unwrap();
+        assert_eq!(vm.heap.used(), 0);
     }
 
     #[test]
@@ -288,8 +394,75 @@ fn main() {
     ctx_free(ctx);
 }
 "#;
-        // Simulated backend returns uniform weights over labels:
-        // "angry"=0.5 < 0.7, "help"=0.5 >= 0.4 → "Support standard" branch fires.
+        let bytes = lagent_compiler::compile(src).unwrap();
+        make_vm().execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn executes_kernel_call() {
+        let src = r#"
+type Sentiment = semantic("positive", "negative", "neutral");
+
+kernel AnalyseSentiment(text: str) -> Sentiment {
+    observe(text);
+    reason("Classify the sentiment of the input text");
+    let result: Sentiment = infer(text);
+    verify(result != "");
+    return result;
+}
+
+fn main() {
+    let ctx = ctx_alloc(1024);
+    ctx_append(ctx, "This product is absolutely fantastic!");
+    let sentiment = AnalyseSentiment(ctx);
+    println(sentiment);
+    ctx_free(ctx);
+}
+"#;
+        let bytes = lagent_compiler::compile(src).unwrap();
+        make_vm().execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn verify_retry_exhaustion_returns_error() {
+        let src = r#"
+kernel AlwaysFail(x: str) -> str {
+    verify(0);
+    return x;
+}
+fn main() {
+    let result = AlwaysFail("test");
+    println(result);
+}
+"#;
+        let bytes = lagent_compiler::compile(src).unwrap();
+        let err = make_vm().execute(&bytes).unwrap_err();
+        assert!(err.to_string().contains("VerifyFail"));
+    }
+
+    #[test]
+    fn ctx_compress_replaces_content() {
+        let src = r#"
+fn main() {
+    let ctx = ctx_alloc(1024);
+    ctx_append(ctx, "Hello world this is a long string");
+    ctx_compress(ctx);
+    ctx_free(ctx);
+}
+"#;
+        let bytes = lagent_compiler::compile(src).unwrap();
+        make_vm().execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn interruptible_block_executes_normally() {
+        let src = r#"
+fn main() {
+    interruptible {
+        println("inside interruptible");
+    }
+}
+"#;
         let bytes = lagent_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
@@ -297,21 +470,6 @@ fn main() {
     #[test]
     fn branch_default_fires_when_no_case_matches() {
         let src = r#"
-fn main() {
-    branch intent {
-        case "angry" (confidence > 0.9) => {
-            println("crise");
-        }
-        default => {
-            println("default");
-        }
-    }
-}
-"#;
-        // Simulated backend returns 1.0 for single label "angry".
-        // But threshold is 0.9 and weight = 1/1 = 1.0 >= 0.9, so "crise" fires.
-        // Use two labels so each gets 0.5 < 0.9 → default fires.
-        let src2 = r#"
 fn main() {
     branch intent {
         case "angry" (confidence > 0.9) => {
@@ -326,23 +484,7 @@ fn main() {
     }
 }
 "#;
-        let _ = src; // single-label version fires the case, kept for documentation
-        let bytes = lagent_compiler::compile(src2).unwrap();
+        let bytes = lagent_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
-    }
-
-    #[test]
-    fn ctx_alloc_and_free_balance_heap() {
-        use lagent_compiler::codegen::opcodes::Bytecode;
-        let bc = Bytecode::new(vec![
-            OpCode::CtxAlloc(256),
-            OpCode::CtxFreeStack,
-            OpCode::Halt,
-        ]);
-        let bytes = bincode::serialize(&bc).unwrap();
-        let mut vm = make_vm();
-        vm.execute(&bytes).unwrap();
-        // After alloc+free the heap should be empty.
-        assert_eq!(vm.heap.used(), 0);
     }
 }

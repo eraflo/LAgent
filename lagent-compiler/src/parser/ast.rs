@@ -60,6 +60,8 @@ pub enum Stmt {
     Return(Expr),
     Expr(Expr),
     Branch(BranchStmt),
+    /// An interruptible block — a Safe Interaction Point the VM can checkpoint.
+    Interruptible(Block),
 }
 
 #[derive(Debug, Clone)]

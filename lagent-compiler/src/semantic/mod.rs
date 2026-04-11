@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Semantic analysis: name resolution and basic constraint validation.
 
-use crate::parser::ast::{Expr, FnDef, Item, Stmt};
+use crate::parser::ast::{Expr, FnDef, Item, KernelDef, Stmt, TypeExpr};
 use anyhow::{anyhow, Result};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-/// The output of semantic analysis: the original items plus (future) type info.
+/// The output of semantic analysis: the original items plus the resolved type
+/// environment mapping semantic type names to their label sets.
 pub struct TypedAst {
     pub items: Vec<Item>,
+    /// Maps `type Name = semantic(...)` aliases to their label lists.
+    /// Used by codegen to populate `InferClassify` with the correct labels.
+    pub type_env: HashMap<String, Vec<String>>,
 }
 
 /// Perform semantic analysis: name resolution and basic constraint validation.
@@ -16,19 +20,36 @@ pub struct TypedAst {
 ///
 /// Returns an error if an identifier is used before it is declared.
 pub fn analyze(items: Vec<Item>) -> Result<TypedAst> {
+    // Build type environment from TypeAlias items.
+    let mut type_env: HashMap<String, Vec<String>> = HashMap::new();
+    for item in &items {
+        if let Item::TypeAlias(ta) = item {
+            if let TypeExpr::Semantic(labels) = &ta.def {
+                type_env.insert(ta.name.clone(), labels.clone());
+            }
+        }
+    }
+
+    // Name-check all fn and kernel definitions.
     for item in &items {
         match item {
             Item::FnDef(f) => check_fn(f)?,
-            Item::KernelDef(_) | Item::TypeAlias(_) => {}
+            Item::KernelDef(k) => check_kernel(k)?,
+            Item::TypeAlias(_) => {}
         }
     }
-    Ok(TypedAst { items })
+
+    Ok(TypedAst { items, type_env })
 }
 
 fn check_fn(f: &FnDef) -> Result<()> {
-    // Seed scope with parameter names.
     let mut scope: HashSet<String> = f.params.iter().map(|p| p.name.clone()).collect();
     check_block(&f.body, &mut scope)
+}
+
+fn check_kernel(k: &KernelDef) -> Result<()> {
+    let mut scope: HashSet<String> = k.params.iter().map(|p| p.name.clone()).collect();
+    check_block(&k.body, &mut scope)
 }
 
 fn check_block(block: &[Stmt], scope: &mut HashSet<String>) -> Result<()> {
@@ -50,6 +71,10 @@ fn check_block(block: &[Stmt], scope: &mut HashSet<String>) -> Result<()> {
                     check_block(default, &mut inner)?;
                 }
             }
+            Stmt::Interruptible(block) => {
+                let mut inner = scope.clone();
+                check_block(block, &mut inner)?;
+            }
         }
     }
     Ok(())
@@ -58,7 +83,6 @@ fn check_block(block: &[Stmt], scope: &mut HashSet<String>) -> Result<()> {
 fn check_expr(expr: &Expr, scope: &HashSet<String>) -> Result<()> {
     match expr {
         Expr::Ident(name) => {
-            // Built-in names are always in scope.
             if is_builtin(name) || scope.contains(name.as_str()) {
                 Ok(())
             } else {
@@ -87,6 +111,7 @@ fn is_builtin(name: &str) -> bool {
             | "ctx_free"
             | "ctx_append"
             | "ctx_resize"
+            | "ctx_compress"
             | "observe"
             | "reason"
             | "act"
@@ -133,6 +158,41 @@ fn main() {
     #[test]
     fn accepts_parameter_in_body() {
         let src = "fn greet(msg: str) { println(msg); }";
+        assert!(compile_src(src).is_ok());
+    }
+
+    #[test]
+    fn builds_type_env_from_aliases() {
+        let src = r#"type Emotion = semantic("joie", "colère", "neutre"); fn main() {}"#;
+        let ast = compile_src(src).unwrap();
+        let labels = ast.type_env.get("Emotion").unwrap();
+        assert_eq!(labels.len(), 3);
+    }
+
+    #[test]
+    fn accepts_kernel_def() {
+        let src = r#"
+kernel Foo(x: str) -> str {
+    observe(x);
+    reason("test");
+    let r: str = infer(x);
+    verify(r != "");
+    return r;
+}
+fn main() {}
+"#;
+        assert!(compile_src(src).is_ok());
+    }
+
+    #[test]
+    fn accepts_interruptible_block() {
+        let src = r#"
+fn main() {
+    interruptible {
+        println("safe point");
+    }
+}
+"#;
         assert!(compile_src(src).is_ok());
     }
 }

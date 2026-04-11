@@ -12,6 +12,12 @@ pub trait InferenceBackend: Send + Sync {
 
     /// Classify the prompt against a set of labels and return (label, confidence) pairs.
     fn classify(&self, prompt: &str, labels: &[String]) -> Result<Vec<(String, f32)>>;
+
+    /// Summarise `text` to reclaim token budget (used by `ctx_compress`).
+    fn compress(&self, text: &str) -> Result<String>;
+
+    /// Execute an action described by `payload` and return the result.
+    fn act(&self, payload: &str) -> Result<String>;
 }
 
 pub use simulated::SimulatedBackend;
