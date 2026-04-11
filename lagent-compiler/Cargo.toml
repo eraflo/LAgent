@@ -15,4 +15,4 @@ chumsky = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
-bincode = "1"
+bincode = "3"
