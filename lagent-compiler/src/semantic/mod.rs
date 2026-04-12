@@ -28,128 +28,95 @@ pub struct TypedAst {
 ///
 /// Returns an error if an identifier is used before it is declared.
 pub fn analyze(items: Vec<Item>) -> Result<TypedAst> {
-    // ── Build global environment from declarations ─────────────────────────
-    let mut type_env: HashMap<String, Vec<String>> = HashMap::new();
-    let mut oracle_names: Vec<String> = Vec::new();
-    let mut lore_table: HashMap<String, String> = HashMap::new();
-    let mut constraint_bodies: HashMap<String, Block> = HashMap::new();
-    // Names that are callable: fn/kernel/skill/spell/oracle.
-    let mut callable_names: HashSet<String> = HashSet::new();
-    // Names that are memory slots (valid as identifiers).
-    let mut memory_names: HashSet<String> = HashSet::new();
-    // Names that are lore keys (valid as identifiers).
-    let mut lore_names: HashSet<String> = HashSet::new();
-    // Names of declared constraints, for apply-statement resolution.
-    let mut constraint_names: HashSet<String> = HashSet::new();
-
-    for item in &items {
-        match item {
-            Item::TypeAlias(ta) => {
-                if let TypeExpr::Semantic(labels) = &ta.def {
-                    type_env.insert(ta.name.clone(), labels.clone());
-                }
-            }
-            Item::FnDef(f) => {
-                callable_names.insert(f.name.clone());
-            }
-            Item::KernelDef(k) => {
-                callable_names.insert(k.name.clone());
-            }
-            Item::SkillDef(s) => {
-                callable_names.insert(s.name.clone());
-            }
-            Item::SpellDef(s) => {
-                callable_names.insert(s.name.clone());
-            }
-            Item::OracleDecl(o) => {
-                callable_names.insert(o.name.clone());
-                oracle_names.push(o.name.clone());
-            }
-            Item::MemoryDecl(m) => {
-                memory_names.insert(m.name.clone());
-            }
-            Item::LoreDecl(l) => {
-                lore_names.insert(l.name.clone());
-                lore_table.insert(l.name.clone(), l.value.clone());
-            }
-            Item::ConstraintDef(c) => {
-                constraint_names.insert(c.name.clone());
-                constraint_bodies.insert(c.name.clone(), c.body.clone());
-            }
-            Item::SoulDef(_) | Item::UseDecl(_) => {}
-        }
-    }
-
-    // ── Name-check all bodies ─────────────────────────────────────────────
-    for item in &items {
-        match item {
-            Item::FnDef(f) => {
-                check_fn(
-                    f,
-                    &callable_names,
-                    &memory_names,
-                    &lore_names,
-                    &constraint_names,
-                )?;
-            }
-            Item::KernelDef(k) => {
-                check_kernel(
-                    k,
-                    &callable_names,
-                    &memory_names,
-                    &lore_names,
-                    &constraint_names,
-                )?;
-            }
-            Item::SkillDef(s) => {
-                check_skill(
-                    s,
-                    &callable_names,
-                    &memory_names,
-                    &lore_names,
-                    &constraint_names,
-                )?;
-            }
-            Item::SpellDef(s) => {
-                check_spell(
-                    s,
-                    &callable_names,
-                    &memory_names,
-                    &lore_names,
-                    &constraint_names,
-                )?;
-            }
-            Item::SoulDef(s) => {
-                let mut scope = HashSet::new();
-                check_block(
-                    &s.body,
-                    &mut scope,
-                    &callable_names,
-                    &memory_names,
-                    &lore_names,
-                    &constraint_names,
-                )?;
-            }
-            Item::MemoryDecl(m) => {
-                let scope = HashSet::new();
-                check_expr(&m.init, &scope, &callable_names, &memory_names, &lore_names)?;
-            }
-            Item::ConstraintDef(c) => {
-                // Constraint bodies may reference locals from the call site —
-                // skip strict name-checking (inlined at call site).
-                check_constraint_relaxed(c);
-            }
-            Item::TypeAlias(_) | Item::OracleDecl(_) | Item::LoreDecl(_) | Item::UseDecl(_) => {}
-        }
-    }
-
+    let env = GlobalEnv::build(&items);
+    env.check_all(&items)?;
     Ok(TypedAst {
         items,
-        type_env,
-        oracle_names,
-        lore_table,
-        constraint_bodies,
+        type_env: env.type_env,
+        oracle_names: env.oracle_names,
+        lore_table: env.lore_table,
+        constraint_bodies: env.constraint_bodies,
     })
+}
+
+/// All name-resolution tables derived from the top-level declarations.
+struct GlobalEnv {
+    type_env: HashMap<String, Vec<String>>,
+    oracle_names: Vec<String>,
+    lore_table: HashMap<String, String>,
+    constraint_bodies: HashMap<String, Block>,
+    callable_names: HashSet<String>,
+    memory_names: HashSet<String>,
+    lore_names: HashSet<String>,
+    constraint_names: HashSet<String>,
+}
+
+impl GlobalEnv {
+    fn build(items: &[Item]) -> Self {
+        let mut env = Self {
+            type_env: HashMap::new(),
+            oracle_names: Vec::new(),
+            lore_table: HashMap::new(),
+            constraint_bodies: HashMap::new(),
+            callable_names: HashSet::new(),
+            memory_names: HashSet::new(),
+            lore_names: HashSet::new(),
+            constraint_names: HashSet::new(),
+        };
+        for item in items {
+            match item {
+                Item::TypeAlias(ta) => {
+                    if let TypeExpr::Semantic(labels) = &ta.def {
+                        env.type_env.insert(ta.name.clone(), labels.clone());
+                    }
+                }
+                Item::FnDef(f) => { env.callable_names.insert(f.name.clone()); }
+                Item::KernelDef(k) => { env.callable_names.insert(k.name.clone()); }
+                Item::SkillDef(s) => { env.callable_names.insert(s.name.clone()); }
+                Item::SpellDef(s) => { env.callable_names.insert(s.name.clone()); }
+                Item::OracleDecl(o) => {
+                    env.callable_names.insert(o.name.clone());
+                    env.oracle_names.push(o.name.clone());
+                }
+                Item::MemoryDecl(m) => { env.memory_names.insert(m.name.clone()); }
+                Item::LoreDecl(l) => {
+                    env.lore_names.insert(l.name.clone());
+                    env.lore_table.insert(l.name.clone(), l.value.clone());
+                }
+                Item::ConstraintDef(c) => {
+                    env.constraint_names.insert(c.name.clone());
+                    env.constraint_bodies.insert(c.name.clone(), c.body.clone());
+                }
+                Item::SoulDef(_) | Item::UseDecl(_) => {}
+            }
+        }
+        env
+    }
+
+    fn check_all(&self, items: &[Item]) -> Result<()> {
+        let Self { callable_names: callable, memory_names: memory, lore_names: lore,
+                   constraint_names: constraints, .. } = self;
+        for item in items {
+            match item {
+                Item::FnDef(f) => check_fn(f, callable, memory, lore, constraints)?,
+                Item::KernelDef(k) => check_kernel(k, callable, memory, lore, constraints)?,
+                Item::SkillDef(s) => check_skill(s, callable, memory, lore, constraints)?,
+                Item::SpellDef(s) => check_spell(s, callable, memory, lore, constraints)?,
+                Item::SoulDef(s) => {
+                    let mut scope = HashSet::new();
+                    check_block(&s.body, &mut scope, callable, memory, lore, constraints)?;
+                }
+                Item::MemoryDecl(m) => {
+                    let scope = HashSet::new();
+                    check_expr(&m.init, &scope, callable, memory, lore)?;
+                }
+                Item::ConstraintDef(c) => check_constraint_relaxed(c),
+                Item::TypeAlias(_) | Item::OracleDecl(_) | Item::LoreDecl(_)
+                | Item::UseDecl(_) => {}
+            }
+        }
+        Ok(())
+    }
 }
 
 fn check_fn(
