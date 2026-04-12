@@ -82,7 +82,12 @@ impl fmt::Display for Pp<'_, KernelDef> {
             write!(f, "{i}kernel {}(", self.0.name)?;
         }
         fmt_params(f, &self.0.params)?;
-        write!(f, ") -> {} {}", Pp(&self.0.return_type, 0), fmt_block(&self.0.body, self.1))
+        write!(
+            f,
+            ") -> {} {}",
+            Pp(&self.0.return_type, 0),
+            fmt_block(&self.0.body, self.1)
+        )
     }
 }
 
@@ -113,7 +118,12 @@ impl fmt::Display for Pp<'_, SpellDef> {
             write!(f, "{i}spell {}(", self.0.name)?;
         }
         fmt_params(f, &self.0.params)?;
-        write!(f, ") -> {} {}", Pp(&self.0.ret, 0), fmt_block(&self.0.body, self.1))
+        write!(
+            f,
+            ") -> {} {}",
+            Pp(&self.0.ret, 0),
+            fmt_block(&self.0.body, self.1)
+        )
     }
 }
 
@@ -164,9 +174,19 @@ impl fmt::Display for Pp<'_, ConstraintDef> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let i = ind(self.1);
         if self.0.is_pub {
-            write!(f, "{i}pub constraint {} {}", self.0.name, fmt_block(&self.0.body, self.1))
+            write!(
+                f,
+                "{i}pub constraint {} {}",
+                self.0.name,
+                fmt_block(&self.0.body, self.1)
+            )
         } else {
-            write!(f, "{i}constraint {} {}", self.0.name, fmt_block(&self.0.body, self.1))
+            write!(
+                f,
+                "{i}constraint {} {}",
+                self.0.name,
+                fmt_block(&self.0.body, self.1)
+            )
         }
     }
 }
@@ -235,12 +255,7 @@ impl fmt::Display for Pp<'_, BranchStmt> {
             write!(f, "{}", Pp(&(case, inner), 0))?;
         }
         if let Some(default) = &self.0.default {
-            writeln!(
-                f,
-                "{}default => {}",
-                ind(inner),
-                fmt_block(default, inner)
-            )?;
+            writeln!(f, "{}default => {}", ind(inner), fmt_block(default, inner))?;
         }
         write!(f, "{i}}}")
     }
@@ -280,7 +295,13 @@ impl fmt::Display for Pp<'_, Expr> {
                 write!(f, ")")
             }
             Expr::BinOp(lhs, op, rhs) => {
-                write!(f, "{} {} {}", Pp(lhs.as_ref(), 0), Pp(op, 0), Pp(rhs.as_ref(), 0))
+                write!(
+                    f,
+                    "{} {} {}",
+                    Pp(lhs.as_ref(), 0),
+                    Pp(op, 0),
+                    Pp(rhs.as_ref(), 0)
+                )
             }
         }
     }

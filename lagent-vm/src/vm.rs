@@ -782,6 +782,9 @@ fn main() {
 }
 ";
         let result = lagent_compiler::compile(src);
-        assert!(result.is_err(), "expected semantic error for unknown constraint");
+        assert!(
+            result.is_err(),
+            "expected semantic error for unknown constraint"
+        );
     }
 }

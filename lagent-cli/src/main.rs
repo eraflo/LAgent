@@ -23,7 +23,10 @@ enum Command {
         input: Option<PathBuf>,
         #[arg(short, long, help = "Output file (.lbc or .lalb)")]
         output: Option<PathBuf>,
-        #[arg(long, help = "Compile as a library (.lalb) instead of an executable (.lbc)")]
+        #[arg(
+            long,
+            help = "Compile as a library (.lalb) instead of an executable (.lbc)"
+        )]
         lib: bool,
         #[arg(long, help = "Library name (overrides lagent.toml)")]
         name: Option<String>,
@@ -84,11 +87,7 @@ fn main() -> Result<()> {
                 let bundle = lagent_compiler::compile_library_file(&source_path, &lib_name)?;
                 let out = output.unwrap_or_else(|| source_path.with_extension("lalb"));
                 std::fs::write(&out, &bundle)?;
-                println!(
-                    "Library {} -> {}",
-                    source_path.display(),
-                    out.display()
-                );
+                println!("Library {} -> {}", source_path.display(), out.display());
             } else {
                 let bytecode = lagent_compiler::compile_file(&source_path)?;
                 let out = output.unwrap_or_else(|| source_path.with_extension("lbc"));

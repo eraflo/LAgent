@@ -84,16 +84,40 @@ pub fn analyze(items: Vec<Item>) -> Result<TypedAst> {
     for item in &items {
         match item {
             Item::FnDef(f) => {
-                check_fn(f, &callable_names, &memory_names, &lore_names, &constraint_names)?;
+                check_fn(
+                    f,
+                    &callable_names,
+                    &memory_names,
+                    &lore_names,
+                    &constraint_names,
+                )?;
             }
             Item::KernelDef(k) => {
-                check_kernel(k, &callable_names, &memory_names, &lore_names, &constraint_names)?;
+                check_kernel(
+                    k,
+                    &callable_names,
+                    &memory_names,
+                    &lore_names,
+                    &constraint_names,
+                )?;
             }
             Item::SkillDef(s) => {
-                check_skill(s, &callable_names, &memory_names, &lore_names, &constraint_names)?;
+                check_skill(
+                    s,
+                    &callable_names,
+                    &memory_names,
+                    &lore_names,
+                    &constraint_names,
+                )?;
             }
             Item::SpellDef(s) => {
-                check_spell(s, &callable_names, &memory_names, &lore_names, &constraint_names)?;
+                check_spell(
+                    s,
+                    &callable_names,
+                    &memory_names,
+                    &lore_names,
+                    &constraint_names,
+                )?;
             }
             Item::SoulDef(s) => {
                 let mut scope = HashSet::new();
