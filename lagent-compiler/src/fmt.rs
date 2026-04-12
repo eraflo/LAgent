@@ -230,14 +230,14 @@ impl fmt::Display for Pp<'_, BranchStmt> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let i = ind(self.1);
         let inner = self.1 + 1;
-        write!(f, "branch {} {{\n", self.0.var)?;
+        writeln!(f, "branch {} {{", self.0.var)?;
         for case in &self.0.cases {
             write!(f, "{}", Pp(&(case, inner), 0))?;
         }
         if let Some(default) = &self.0.default {
-            write!(
+            writeln!(
                 f,
-                "{}default => {}\n",
+                "{}default => {}",
                 ind(inner),
                 fmt_block(default, inner)
             )?;
@@ -250,9 +250,9 @@ impl fmt::Display for Pp<'_, (&BranchCase, usize)> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (case, indent) = self.0;
         let i = ind(*indent);
-        write!(
+        writeln!(
             f,
-            "{i}case \"{}\" (confidence > {}) => {}\n",
+            "{i}case \"{}\" (confidence > {}) => {}",
             case.label,
             case.confidence,
             fmt_block(&case.body, *indent)

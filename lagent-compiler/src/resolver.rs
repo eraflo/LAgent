@@ -51,14 +51,14 @@ pub fn resolve_uses(items: Vec<Item>, base_dir: &Path) -> Result<Vec<Item>> {
 /// are not re-exported from modules.
 fn item_is_pub(item: &Item) -> bool {
     match item {
-        Item::FnDef(FnDef { is_pub, .. }) => *is_pub,
-        Item::KernelDef(KernelDef { is_pub, .. }) => *is_pub,
-        Item::SkillDef(SkillDef { is_pub, .. }) => *is_pub,
-        Item::SpellDef(SpellDef { is_pub, .. }) => *is_pub,
-        Item::TypeAlias(TypeAlias { is_pub, .. }) => *is_pub,
-        Item::OracleDecl(OracleDecl { is_pub, .. }) => *is_pub,
-        Item::ConstraintDef(ConstraintDef { is_pub, .. }) => *is_pub,
-        Item::LoreDecl(LoreDecl { is_pub, .. }) => *is_pub,
+        Item::FnDef(FnDef { is_pub, .. })
+        | Item::KernelDef(KernelDef { is_pub, .. })
+        | Item::SkillDef(SkillDef { is_pub, .. })
+        | Item::SpellDef(SpellDef { is_pub, .. })
+        | Item::TypeAlias(TypeAlias { is_pub, .. })
+        | Item::OracleDecl(OracleDecl { is_pub, .. })
+        | Item::ConstraintDef(ConstraintDef { is_pub, .. })
+        | Item::LoreDecl(LoreDecl { is_pub, .. }) => *is_pub,
         // SoulDef, MemoryDecl, UseDecl are not re-exported from modules.
         Item::SoulDef(_) | Item::MemoryDecl(_) | Item::UseDecl(_) => false,
     }

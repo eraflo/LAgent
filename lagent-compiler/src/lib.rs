@@ -31,7 +31,7 @@ pub fn compile(source: &str) -> Result<Vec<u8>> {
     let tokens = lexer::tokenize(source)?;
     let ast = parser::parse(tokens)?;
     let typed_ast = semantic::analyze(ast)?;
-    let bytecode = codegen::generate(typed_ast)?;
+    let bytecode = codegen::generate(&typed_ast)?;
     Ok(bytecode)
 }
 
@@ -48,7 +48,7 @@ pub fn compile_file(path: &std::path::Path) -> Result<Vec<u8>> {
     let ast = parser::parse(tokens)?;
     let ast = resolver::resolve_uses(ast, base_dir)?;
     let typed_ast = semantic::analyze(ast)?;
-    let bytecode = codegen::generate(typed_ast)?;
+    let bytecode = codegen::generate(&typed_ast)?;
     Ok(bytecode)
 }
 
@@ -67,7 +67,7 @@ pub fn compile_library_file(path: &std::path::Path, lib_name: &str) -> Result<Ve
     let ast = parser::parse(tokens)?;
     let ast = resolver::resolve_uses(ast, base_dir)?;
     let typed_ast = semantic::analyze(ast)?;
-    let bundle = codegen::generate_lib(typed_ast, lib_name)?;
+    let bundle = codegen::generate_lib(&typed_ast, lib_name)?;
     Ok(bundle)
 }
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Bytecode code generator: walks the typed AST and emits [`OpCode`](opcodes::OpCode) sequences.
+//! Bytecode code generator: walks the typed AST and emits [`OpCode`] sequences.
 
 pub mod opcodes;
 
@@ -14,8 +14,8 @@ use std::collections::{HashMap, HashSet};
 /// # Errors
 ///
 /// Returns an error if an unsupported AST construct is encountered.
-pub fn generate(ast: TypedAst) -> Result<Vec<u8>> {
-    let bytecode = generate_bytecode(&ast, false)?;
+pub fn generate(ast: &TypedAst) -> Result<Vec<u8>> {
+    let bytecode = generate_bytecode(ast, false)?;
     let encoded = bincode::serialize(&bytecode)?;
     Ok(encoded)
 }
@@ -27,8 +27,9 @@ pub fn generate(ast: TypedAst) -> Result<Vec<u8>> {
 /// # Errors
 ///
 /// Returns an error if an unsupported AST construct is encountered.
-pub fn generate_lib(ast: TypedAst, lib_name: &str) -> Result<Vec<u8>> {
-    let bytecode = generate_bytecode(&ast, true)?;
+#[allow(clippy::cast_possible_truncation)]
+pub fn generate_lib(ast: &TypedAst, lib_name: &str) -> Result<Vec<u8>> {
+    let bytecode = generate_bytecode(ast, true)?;
 
     // Build the export table from pub items.
     let mut exports: Vec<ExportEntry> = Vec::new();
@@ -93,6 +94,7 @@ pub fn generate_lib(ast: TypedAst, lib_name: &str) -> Result<Vec<u8>> {
     Ok(encoded)
 }
 
+#[allow(clippy::too_many_lines)]
 fn generate_bytecode(ast: &TypedAst, _lib_mode: bool) -> Result<Bytecode> {
     let type_env = ast.type_env.clone();
     let oracle_set: HashSet<String> = ast.oracle_names.iter().cloned().collect();
@@ -195,7 +197,7 @@ fn generate_bytecode(ast: &TypedAst, _lib_mode: bool) -> Result<Bytecode> {
         }
     }
 
-    for item in ast.items.iter() {
+    for item in &ast.items {
         if let Item::FnDef(f) = item {
             // Emit the soul preamble before `fn main`.
             if f.name == "main" {
@@ -489,7 +491,7 @@ mod tests {
         let tokens = tokenize(src).unwrap();
         let items = parse(tokens).unwrap();
         let typed = analyze(items).unwrap();
-        let bytes = generate(typed).unwrap();
+        let bytes = generate(&typed).unwrap();
         let bc: Bytecode = bincode::deserialize(&bytes).unwrap();
         bc.instructions
     }
@@ -498,7 +500,7 @@ mod tests {
         let tokens = tokenize(src).unwrap();
         let items = parse(tokens).unwrap();
         let typed = analyze(items).unwrap();
-        let bytes = generate(typed).unwrap();
+        let bytes = generate(&typed).unwrap();
         bincode::deserialize(&bytes).unwrap()
     }
 

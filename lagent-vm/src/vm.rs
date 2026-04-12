@@ -675,7 +675,7 @@ fn main() {
     #[test]
     fn constraint_violation_is_non_retriable() {
         // A constraint violation must NOT retry; it propagates immediately.
-        let src = r#"
+        let src = r"
 constraint NonEmpty {
     verify(0);
 }
@@ -683,7 +683,7 @@ constraint NonEmpty {
 fn main() {
     apply NonEmpty;
 }
-"#;
+";
         let bytes = lagent_compiler::compile(src).unwrap();
         let err = make_vm().execute(&bytes).unwrap_err();
         assert!(
@@ -776,11 +776,11 @@ fn main() {
     #[test]
     fn semantic_rejects_unknown_constraint() {
         // Applying a constraint that was never declared must fail at semantic analysis.
-        let src = r#"
+        let src = r"
 fn main() {
     apply Undefined;
 }
-"#;
+";
         let result = lagent_compiler::compile(src);
         assert!(result.is_err(), "expected semantic error for unknown constraint");
     }

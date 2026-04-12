@@ -78,7 +78,7 @@ fn main() -> Result<()> {
             name,
         } => {
             // Resolve the source file: explicit arg > lagent.toml entry > error.
-            let (source_path, lib_name) = resolve_build_input(input, &name, lib)?;
+            let (source_path, lib_name) = resolve_build_input(input, name.as_ref(), lib)?;
 
             if lib {
                 let bundle = lagent_compiler::compile_library_file(&source_path, &lib_name)?;
@@ -149,13 +149,13 @@ fn main() -> Result<()> {
 ///    `--lib` is set, else `project.entry`).
 fn resolve_build_input(
     input: Option<PathBuf>,
-    name_override: &Option<String>,
+    name_override: Option<&String>,
     lib_mode: bool,
 ) -> Result<(PathBuf, String)> {
     if let Some(path) = input {
         // Derive a lib name from the override, then the filename stem.
         let lib_name = name_override
-            .clone()
+            .cloned()
             .or_else(|| path.file_stem().map(|s| s.to_string_lossy().into_owned()))
             .unwrap_or_else(|| "library".to_string());
         return Ok((path, lib_name));
@@ -176,7 +176,7 @@ fn resolve_build_input(
         };
 
         let path = root.join(&entry);
-        let lib_name = name_override.clone().unwrap_or(lib_name);
+        let lib_name = name_override.map_or(lib_name, String::clone);
         return Ok((path, lib_name));
     }
 
