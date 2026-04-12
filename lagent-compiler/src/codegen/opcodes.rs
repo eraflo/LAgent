@@ -91,6 +91,32 @@ pub enum OpCode {
     CmpGt,
     /// `Int(1)` if lhs < rhs, else `Int(0)`.
     CmpLt,
+
+    // ── Phase 4: agent vocabulary ─────────────────────────────────────────────
+    /// Store the agent soul identity string in the VM for introspection.
+    SetAgentMeta(String),
+    /// Append a literal string to the context handle named `ctx` in scope, if any.
+    CtxAppendLiteral(String),
+    /// Record a skill name in VM metadata (no runtime effect).
+    RegisterSkill(String),
+    /// Pop TOS (initial value) and allocate a named persistent memory slot.
+    AllocMemorySlot(String),
+    /// Push the current value of a named persistent memory slot onto the stack.
+    LoadMemory(String),
+    /// Pop TOS and store it in a named persistent memory slot.
+    StoreMemory(String),
+    /// Pop N args from the stack and call a named oracle; push the result string.
+    CallOracle(String, u8),
+    /// Mark the start of a named constraint block (for diagnostics).
+    BeginConstraint(String),
+    /// Mark the end of a constraint block.
+    EndConstraint,
+    /// Store a lore entry (`name → text`) in the VM lore table.
+    StoreLore(String, String),
+    /// Push a lore string by name onto the stack.
+    LoadLore(String),
+    /// Duplicate the top-of-stack context handle (both references the same segment).
+    CtxShare,
 }
 
 /// Per-kernel compiled bytecode stored alongside the main instruction stream.

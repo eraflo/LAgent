@@ -13,4 +13,5 @@ pub mod backends;
 pub mod runtime;
 pub mod vm;
 
+pub use backends::InferenceBackend;
 pub use vm::Vm;

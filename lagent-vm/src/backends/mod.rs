@@ -3,6 +3,9 @@
 
 pub mod simulated;
 
+#[cfg(feature = "backend-remote")]
+pub mod anthropic;
+
 use anyhow::Result;
 
 /// Trait implemented by all inference backends.
@@ -18,6 +21,11 @@ pub trait InferenceBackend: Send + Sync {
 
     /// Execute an action described by `payload` and return the result.
     fn act(&self, payload: &str) -> Result<String>;
+
+    /// Query an external oracle by name with the given argument strings; return a result string.
+    fn oracle(&self, name: &str, args: &[String]) -> Result<String>;
 }
 
+#[cfg(feature = "backend-remote")]
+pub use anthropic::AnthropicBackend;
 pub use simulated::SimulatedBackend;
