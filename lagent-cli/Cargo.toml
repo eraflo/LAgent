@@ -18,3 +18,7 @@ lagent-compiler = { path = "../lagent-compiler" }
 lagent-vm = { path = "../lagent-vm" }
 clap = { workspace = true }
 anyhow = { workspace = true }
+
+[features]
+default = []
+backend-remote = ["lagent-vm/backend-remote"]

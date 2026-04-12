@@ -9,8 +9,9 @@ pub mod ast;
 use crate::lexer::Token;
 use anyhow::{anyhow, Result};
 use ast::{
-    BinOp, Block, BranchCase, BranchStmt, Expr, FnDef, Item, KernelDef, Param, PrimType, Stmt,
-    TypeAlias, TypeExpr,
+    BinOp, Block, BranchCase, BranchStmt, ConstraintDef, Expr, FnDef, Item, KernelDef, LoreDecl,
+    MemoryDecl, OracleDecl, Param, PrimType, SkillDef, SoulDef, SpellDef, Stmt, TypeAlias,
+    TypeExpr, UseDecl,
 };
 use chumsky::prelude::*;
 
@@ -106,6 +107,7 @@ fn expr() -> impl Parser<Token, Expr, Error = Simple<Token>> {
                     | Token::CtxAppend
                     | Token::CtxResize
                     | Token::CtxCompress
+                    | Token::CtxShare
                     | Token::Observe
                     | Token::Reason
                     | Token::Act
@@ -120,6 +122,7 @@ fn expr() -> impl Parser<Token, Expr, Error = Simple<Token>> {
             Token::CtxAppend => "ctx_append".to_string(),
             Token::CtxResize => "ctx_resize".to_string(),
             Token::CtxCompress => "ctx_compress".to_string(),
+            Token::CtxShare => "ctx_share".to_string(),
             Token::Observe => "observe".to_string(),
             Token::Reason => "reason".to_string(),
             Token::Act => "act".to_string(),
@@ -184,29 +187,35 @@ fn stmt() -> impl Parser<Token, Stmt, Error = Simple<Token>> {
 
         let expr_stmt = expr().then_ignore(just(Token::Semi)).map(Stmt::Expr);
 
+        // instruction "text";
+        let instruction_stmt = just(Token::Instruction)
+            .ignore_then(str_inner())
+            .then_ignore(just(Token::Semi))
+            .map(Stmt::Instruction);
+
         // branch <name> { case "label" (confidence > N) => { ... } ... default => { ... } }
-        //
-        // Confidence expression: `confidence > 0.7` or `confidence > 1`
-        // We extract the threshold from either a FloatLit or an IntLit.
-        let threshold = filter(|t| matches!(t, Token::FloatLit(_))).map(|t| {
-            if let Token::FloatLit(f) = t {
-                f
-            } else {
-                unreachable!()
-            }
-        }).or(filter(|t| matches!(t, Token::IntLit(_))).map(|t| {
-            if let Token::IntLit(n) = t {
-                #[allow(clippy::cast_precision_loss)]
-                { n as f64 }
-            } else {
-                unreachable!()
-            }
-        }));
+        let threshold = filter(|t| matches!(t, Token::FloatLit(_)))
+            .map(|t| {
+                if let Token::FloatLit(f) = t {
+                    f
+                } else {
+                    unreachable!()
+                }
+            })
+            .or(filter(|t| matches!(t, Token::IntLit(_))).map(|t| {
+                if let Token::IntLit(n) = t {
+                    #[allow(clippy::cast_precision_loss)]
+                    {
+                        n as f64
+                    }
+                } else {
+                    unreachable!()
+                }
+            }));
 
         // (confidence > N) — we only care about the threshold value.
         let confidence_guard = just(Token::LParen)
             .ignore_then(
-                // "confidence" is tokenised as an Ident
                 ident()
                     .ignore_then(just(Token::Gt).or(just(Token::Lt)))
                     .ignore_then(threshold),
@@ -237,14 +246,19 @@ fn stmt() -> impl Parser<Token, Stmt, Error = Simple<Token>> {
                     .delimited_by(just(Token::LBrace), just(Token::RBrace)),
             )
             .map(|(var, (cases, default))| {
-                Stmt::Branch(BranchStmt { var, cases, default })
+                Stmt::Branch(BranchStmt {
+                    var,
+                    cases,
+                    default,
+                })
             });
 
         let interruptible_stmt = just(Token::Interruptible)
             .ignore_then(block_inner.clone())
             .map(Stmt::Interruptible);
 
-        let_stmt
+        instruction_stmt
+            .or(let_stmt)
             .or(return_stmt)
             .or(branch_stmt)
             .or(interruptible_stmt)
@@ -319,9 +333,105 @@ fn type_alias() -> impl Parser<Token, Item, Error = Simple<Token>> {
         .map(|(name, def)| Item::TypeAlias(TypeAlias { name, def }))
 }
 
+// ── Phase 4 top-level parsers ─────────────────────────────────────────────────
+
+fn soul_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Soul)
+        .ignore_then(block())
+        .map(|body| Item::SoulDef(SoulDef { body }))
+}
+
+fn spell_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Spell)
+        .ignore_then(ident())
+        .then(params())
+        .then_ignore(just(Token::Arrow))
+        .then(type_expr())
+        .then(block())
+        .map(|(((name, params), ret), body)| {
+            Item::SpellDef(SpellDef {
+                name,
+                params,
+                ret,
+                body,
+            })
+        })
+}
+
+fn skill_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Skill))
+        .then(ident())
+        .then(params())
+        .then(just(Token::Arrow).ignore_then(type_expr()).or_not())
+        .then(block())
+        .map(|((((is_pub_opt, name), params), return_type), body)| {
+            Item::SkillDef(SkillDef {
+                name,
+                params,
+                return_type,
+                body,
+                is_pub: is_pub_opt.is_some(),
+            })
+        })
+}
+
+fn memory_decl() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Memory)
+        .ignore_then(ident())
+        .then_ignore(just(Token::Colon))
+        .then(type_expr())
+        .then_ignore(just(Token::Assign))
+        .then(expr())
+        .then_ignore(just(Token::Semi))
+        .map(|((name, ty), init)| Item::MemoryDecl(MemoryDecl { name, ty, init }))
+}
+
+fn oracle_decl() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Oracle)
+        .ignore_then(ident())
+        .then(params())
+        .then_ignore(just(Token::Arrow))
+        .then(type_expr())
+        .then_ignore(just(Token::Semi))
+        .map(|((name, params), ret)| Item::OracleDecl(OracleDecl { name, params, ret }))
+}
+
+fn constraint_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Constraint)
+        .ignore_then(ident())
+        .then(block())
+        .map(|(name, body)| Item::ConstraintDef(ConstraintDef { name, body }))
+}
+
+fn lore_decl() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Lore)
+        .ignore_then(ident())
+        .then_ignore(just(Token::Assign))
+        .then(str_inner())
+        .then_ignore(just(Token::Semi))
+        .map(|(name, value)| Item::LoreDecl(LoreDecl { name, value }))
+}
+
+fn use_decl() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Use)
+        .ignore_then(str_inner())
+        .then_ignore(just(Token::Semi))
+        .map(|path| Item::UseDecl(UseDecl { path }))
+}
+
 fn program() -> impl Parser<Token, Vec<Item>, Error = Simple<Token>> {
     type_alias()
         .or(kernel_def())
+        .or(spell_def())
+        .or(skill_def())
+        .or(soul_def())
+        .or(memory_decl())
+        .or(oracle_decl())
+        .or(constraint_def())
+        .or(lore_decl())
+        .or(use_decl())
         .or(fn_def())
         .repeated()
         .then_ignore(end())
@@ -426,7 +536,7 @@ fn main() {
 
     #[test]
     fn parses_kernel_def() {
-        let src = r#"kernel Foo(x: str) -> str { return x; }"#;
+        let src = r"kernel Foo(x: str) -> str { return x; }";
         let tokens = tokenize(src).unwrap();
         let items = parse(tokens).unwrap();
         assert_eq!(items.len(), 1);
@@ -500,5 +610,133 @@ fn main() {
         assert!(matches!(&items[0], Item::TypeAlias(_)));
         assert!(matches!(&items[1], Item::KernelDef(_)));
         assert!(matches!(&items[2], Item::FnDef(_)));
+    }
+
+    // ── Phase 4 parser tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn parses_soul_def() {
+        let src = r#"
+soul {
+    instruction "You are a helpful agent.";
+    instruction "Always be concise.";
+}
+"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 1);
+        if let Item::SoulDef(s) = &items[0] {
+            assert_eq!(s.body.len(), 2);
+            assert!(matches!(&s.body[0], Stmt::Instruction(_)));
+            assert!(matches!(&s.body[1], Stmt::Instruction(_)));
+        } else {
+            panic!("expected SoulDef");
+        }
+    }
+
+    #[test]
+    fn parses_skill_def() {
+        let src = r"skill Greet(name: str) -> str { return name; }";
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 1);
+        if let Item::SkillDef(s) = &items[0] {
+            assert_eq!(s.name, "Greet");
+            assert_eq!(s.params.len(), 1);
+            assert!(!s.is_pub);
+        } else {
+            panic!("expected SkillDef");
+        }
+    }
+
+    #[test]
+    fn parses_pub_skill_def() {
+        let src = r"pub skill Greet(name: str) -> str { return name; }";
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 1);
+        if let Item::SkillDef(s) = &items[0] {
+            assert!(s.is_pub);
+        } else {
+            panic!("expected SkillDef");
+        }
+    }
+
+    #[test]
+    fn parses_spell_def() {
+        let src = r"spell Analyse(text: str) -> str { return text; }";
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(matches!(&items[0], Item::SpellDef(_)));
+    }
+
+    #[test]
+    fn parses_memory_decl() {
+        let src = r#"memory LastResult: str = "";"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 1);
+        if let Item::MemoryDecl(m) = &items[0] {
+            assert_eq!(m.name, "LastResult");
+            assert!(matches!(&m.ty, TypeExpr::Primitive(PrimType::Str)));
+            assert!(matches!(&m.init, Expr::StringLit(s) if s.is_empty()));
+        } else {
+            panic!("expected MemoryDecl");
+        }
+    }
+
+    #[test]
+    fn parses_oracle_decl() {
+        let src = r"oracle FetchContext(url: str) -> str;";
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 1);
+        if let Item::OracleDecl(o) = &items[0] {
+            assert_eq!(o.name, "FetchContext");
+            assert_eq!(o.params.len(), 1);
+        } else {
+            panic!("expected OracleDecl");
+        }
+    }
+
+    #[test]
+    fn parses_lore_decl() {
+        let src = r#"lore Background = "This agent analyses sentiment.";"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 1);
+        if let Item::LoreDecl(l) = &items[0] {
+            assert_eq!(l.name, "Background");
+            assert_eq!(l.value, "This agent analyses sentiment.");
+        } else {
+            panic!("expected LoreDecl");
+        }
+    }
+
+    #[test]
+    fn parses_use_decl() {
+        let src = r#"use "utils.la";"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 1);
+        if let Item::UseDecl(u) = &items[0] {
+            assert_eq!(u.path, "utils.la");
+        } else {
+            panic!("expected UseDecl");
+        }
+    }
+
+    #[test]
+    fn parses_constraint_def() {
+        let src = r#"constraint PositiveOnly { println("checking"); }"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 1);
+        if let Item::ConstraintDef(c) = &items[0] {
+            assert_eq!(c.name, "PositiveOnly");
+        } else {
+            panic!("expected ConstraintDef");
+        }
     }
 }

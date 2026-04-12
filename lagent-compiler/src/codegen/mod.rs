@@ -7,7 +7,7 @@ use crate::parser::ast::{self as ast, Expr, Item, Stmt, TypeExpr};
 use crate::semantic::TypedAst;
 use anyhow::{anyhow, Result};
 use opcodes::{Bytecode, KernelBytecode, OpCode};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Generate bytecode from the typed AST.
 ///
@@ -16,37 +16,116 @@ use std::collections::HashMap;
 /// Returns an error if an unsupported AST construct is encountered.
 pub fn generate(ast: TypedAst) -> Result<Vec<u8>> {
     let type_env = ast.type_env.clone();
+    let oracle_set: HashSet<String> = ast.oracle_names.iter().cloned().collect();
 
-    // ── Pass 1: compile all kernel definitions ────────────────────────────────
+    // Find the soul definition (at most one), if present.
+    let soul_def = ast.items.iter().find_map(|item| {
+        if let Item::SoulDef(s) = item {
+            Some(s.clone())
+        } else {
+            None
+        }
+    });
+
+    // ── Pass 0: emit lore declarations ────────────────────────────────────────
+    let mut pre_ops: Vec<OpCode> = Vec::new();
+    for item in &ast.items {
+        if let Item::LoreDecl(l) = item {
+            pre_ops.push(OpCode::StoreLore(l.name.clone(), l.value.clone()));
+        }
+    }
+
+    // ── Pass 1: compile kernels + spells into the KernelBytecode table ────────
     let mut kernel_index: HashMap<String, u16> = HashMap::new();
     let mut kernels: Vec<KernelBytecode> = Vec::new();
 
     for item in &ast.items {
-        if let Item::KernelDef(k) = item {
-            #[allow(clippy::cast_possible_truncation)]
-            let idx = kernels.len() as u16;
-            kernel_index.insert(k.name.clone(), idx);
-            let mut gen = Codegen::new(type_env.clone(), kernel_index.clone());
-            gen.emit_block(&k.body)?;
-            kernels.push(KernelBytecode {
-                name: k.name.clone(),
-                params: k.params.iter().map(|p| p.name.clone()).collect(),
-                body: gen.ops,
-                max_retries: 3,
-            });
+        match item {
+            Item::KernelDef(k) => {
+                #[allow(clippy::cast_possible_truncation)]
+                let idx = kernels.len() as u16;
+                kernel_index.insert(k.name.clone(), idx);
+                let mut gen =
+                    Codegen::new(type_env.clone(), kernel_index.clone(), oracle_set.clone());
+                gen.emit_block(&k.body)?;
+                kernels.push(KernelBytecode {
+                    name: k.name.clone(),
+                    params: k.params.iter().map(|p| p.name.clone()).collect(),
+                    body: gen.ops,
+                    max_retries: 3,
+                });
+            }
+            Item::SpellDef(s) => {
+                #[allow(clippy::cast_possible_truncation)]
+                let idx = kernels.len() as u16;
+                kernel_index.insert(s.name.clone(), idx);
+                let mut gen =
+                    Codegen::new(type_env.clone(), kernel_index.clone(), oracle_set.clone());
+                gen.emit_block(&s.body)?;
+                kernels.push(KernelBytecode {
+                    name: s.name.clone(),
+                    params: s.params.iter().map(|p| p.name.clone()).collect(),
+                    body: gen.ops,
+                    max_retries: 3,
+                });
+            }
+            Item::SkillDef(s) => {
+                #[allow(clippy::cast_possible_truncation)]
+                let idx = kernels.len() as u16;
+                kernel_index.insert(s.name.clone(), idx);
+                let mut gen =
+                    Codegen::new(type_env.clone(), kernel_index.clone(), oracle_set.clone());
+                gen.emit_block(&s.body)?;
+                kernels.push(KernelBytecode {
+                    name: s.name.clone(),
+                    params: s.params.iter().map(|p| p.name.clone()).collect(),
+                    body: gen.ops,
+                    max_retries: 3,
+                });
+            }
+            _ => {}
         }
     }
 
-    // ── Pass 2: compile all fn definitions into the main instruction stream ───
-    let mut gen = Codegen::new(type_env, kernel_index);
+    // ── Pass 2: compile fn/skill/memory/oracle into the main instruction stream ─
+    let mut gen = Codegen::new(type_env, kernel_index, oracle_set);
+
+    // Emit lore pre-ops before any fn body.
+    for op in pre_ops {
+        gen.emit(op);
+    }
+
+    // Emit memory initialisations (top of program, before any fn body).
+    for item in &ast.items {
+        if let Item::MemoryDecl(m) = item {
+            gen.emit_expr(&m.init)?;
+            gen.emit(OpCode::AllocMemorySlot(m.name.clone()));
+        }
+    }
 
     for item in ast.items {
         match item {
             Item::FnDef(f) => {
+                // Emit the soul preamble before `fn main`.
+                if f.name == "main" {
+                    if let Some(ref soul) = soul_def {
+                        gen.emit(OpCode::SetAgentMeta("soul".to_string()));
+                        gen.emit_block(&soul.body)?;
+                    }
+                }
                 gen.emit_block(&f.body)?;
                 gen.emit(OpCode::Halt);
             }
-            Item::KernelDef(_) | Item::TypeAlias(_) => {}
+            Item::KernelDef(_)
+            | Item::SpellDef(_)
+            | Item::SkillDef(_)
+            | Item::TypeAlias(_)
+            | Item::SoulDef(_)
+            | Item::MemoryDecl(_)
+            | Item::OracleDecl(_)
+            | Item::ConstraintDef(_)
+            | Item::LoreDecl(_)
+            | Item::UseDecl(_) => {}
         }
     }
 
@@ -65,17 +144,20 @@ struct Codegen {
     ops: Vec<OpCode>,
     type_env: HashMap<String, Vec<String>>,
     kernel_index: HashMap<String, u16>,
+    oracle_set: HashSet<String>,
 }
 
 impl Codegen {
     fn new(
         type_env: HashMap<String, Vec<String>>,
         kernel_index: HashMap<String, u16>,
+        oracle_set: HashSet<String>,
     ) -> Self {
         Self {
             ops: Vec::new(),
             type_env,
             kernel_index,
+            oracle_set,
         }
     }
 
@@ -143,6 +225,11 @@ impl Codegen {
                 self.emit_block(block)?;
                 self.emit(OpCode::EndInterruptible);
             }
+
+            // instruction "text"; — append literal to in-scope ctx handle.
+            Stmt::Instruction(text) => {
+                self.emit(OpCode::CtxAppendLiteral(text.clone()));
+            }
         }
         Ok(())
     }
@@ -169,12 +256,22 @@ impl Codegen {
     }
 
     fn emit_call(&mut self, name: &str, args: &[Expr]) -> Result<()> {
-        // ── Kernel call ───────────────────────────────────────────────────────
+        // ── Kernel / spell call ───────────────────────────────────────────────
         if let Some(&idx) = self.kernel_index.get(name) {
             for a in args {
                 self.emit_expr(a)?;
             }
             self.emit(OpCode::CallKernel(idx));
+            return Ok(());
+        }
+
+        // ── Oracle call ───────────────────────────────────────────────────────
+        if self.oracle_set.contains(name) {
+            for a in args {
+                self.emit_expr(a)?;
+            }
+            #[allow(clippy::cast_possible_truncation)]
+            self.emit(OpCode::CallOracle(name.to_string(), args.len() as u8));
             return Ok(());
         }
 
@@ -196,6 +293,10 @@ impl Codegen {
             "ctx_compress" => {
                 self.emit_expr(arg(args, 0, "ctx_compress")?)?;
                 self.emit(OpCode::CtxCompress);
+            }
+            "ctx_share" => {
+                self.emit_expr(arg(args, 0, "ctx_share")?)?;
+                self.emit(OpCode::CtxShare);
             }
             "println" => {
                 self.emit_expr(arg(args, 0, "println")?)?;
@@ -225,7 +326,7 @@ impl Codegen {
                 self.emit(OpCode::InferClassify(vec![]));
             }
             _ => {
-                // Unknown user-defined function — no call frame support yet (Phase 4).
+                // Unknown call — emit args only (no call frame).
                 for a in args {
                     self.emit_expr(a)?;
                 }
@@ -296,7 +397,9 @@ fn main() {
 "#;
         let ops = compile_ops(src);
         assert!(ops.iter().any(|o| matches!(o, OpCode::CtxAlloc(512))));
-        assert!(ops.iter().any(|o| matches!(o, OpCode::StoreLocal(n) if n == "ctx")));
+        assert!(ops
+            .iter()
+            .any(|o| matches!(o, OpCode::StoreLocal(n) if n == "ctx")));
         assert!(ops.iter().any(|o| matches!(o, OpCode::Println)));
         assert!(ops.iter().any(|o| matches!(o, OpCode::CtxFreeStack)));
         assert!(matches!(ops.last(), Some(OpCode::Halt)));
@@ -324,8 +427,14 @@ fn main() {}
         assert_eq!(bc.kernels.len(), 1);
         assert_eq!(bc.kernels[0].name, "Classify");
         assert_eq!(bc.kernels[0].params, vec!["text"]);
-        assert!(bc.kernels[0].body.iter().any(|o| matches!(o, OpCode::Observe)));
-        assert!(bc.kernels[0].body.iter().any(|o| matches!(o, OpCode::VerifyStep)));
+        assert!(bc.kernels[0]
+            .body
+            .iter()
+            .any(|o| matches!(o, OpCode::Observe)));
+        assert!(bc.kernels[0]
+            .body
+            .iter()
+            .any(|o| matches!(o, OpCode::VerifyStep)));
         assert!(bc.kernels[0].body.iter().any(|o| {
             matches!(o, OpCode::InferClassify(labels) if labels == &["positive", "negative"])
         }));
@@ -348,7 +457,10 @@ fn main() {
 "#;
         let bc = compile_full(src);
         assert_eq!(bc.kernels.len(), 1);
-        assert!(bc.instructions.iter().any(|o| matches!(o, OpCode::CallKernel(0))));
+        assert!(bc
+            .instructions
+            .iter()
+            .any(|o| matches!(o, OpCode::CallKernel(0))));
     }
 
     #[test]
@@ -360,8 +472,66 @@ fn main() {
 
     #[test]
     fn compiles_ctx_compress() {
-        let ops =
-            compile_ops(r#"fn main() { let ctx = ctx_alloc(1024); ctx_compress(ctx); ctx_free(ctx); }"#);
+        let ops = compile_ops(
+            r"fn main() { let ctx = ctx_alloc(1024); ctx_compress(ctx); ctx_free(ctx); }",
+        );
         assert!(ops.iter().any(|o| matches!(o, OpCode::CtxCompress)));
+    }
+
+    #[test]
+    fn compiles_agent_soul() {
+        let src = r#"
+soul {
+    instruction "You are a helpful agent.";
+}
+fn main() {}
+"#;
+        let ops = compile_ops(src);
+        assert!(ops.iter().any(|o| matches!(o, OpCode::SetAgentMeta(_))));
+        assert!(ops.iter().any(|o| matches!(o, OpCode::CtxAppendLiteral(_))));
+    }
+
+    #[test]
+    fn compiles_lore_and_memory() {
+        let src = r#"
+lore Background = "Some lore text.";
+memory LastResult: str = "";
+fn main() {}
+"#;
+        let ops = compile_ops(src);
+        assert!(ops
+            .iter()
+            .any(|o| matches!(o, OpCode::StoreLore(n, _) if n == "Background")));
+        assert!(ops
+            .iter()
+            .any(|o| matches!(o, OpCode::AllocMemorySlot(n) if n == "LastResult")));
+    }
+
+    #[test]
+    fn compiles_spell_into_kernel_table() {
+        let src = "
+spell Greet(name: str) -> str {
+    return name;
+}
+fn main() {}
+";
+        let bc = compile_full(src);
+        assert_eq!(bc.kernels.len(), 1);
+        assert_eq!(bc.kernels[0].name, "Greet");
+    }
+
+    #[test]
+    fn compiles_oracle_call() {
+        let src = r#"
+oracle Lookup(q: str) -> str;
+fn main() {
+    let r = Lookup("test");
+    println(r);
+}
+"#;
+        let ops = compile_ops(src);
+        assert!(ops
+            .iter()
+            .any(|o| matches!(o, OpCode::CallOracle(n, 1) if n == "Lookup")));
     }
 }

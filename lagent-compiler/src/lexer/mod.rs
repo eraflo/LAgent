@@ -89,6 +89,9 @@ pub enum Token {
     /// Summarise a context segment to reclaim token budget.
     #[token("ctx_compress")]
     CtxCompress,
+    /// Share a context handle, pushing a second reference onto the stack.
+    #[token("ctx_share")]
+    CtxShare,
 
     // ── Local model primitives ─────────────────────────────────────────────
     #[token("local_model_load")]

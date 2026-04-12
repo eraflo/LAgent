@@ -43,4 +43,9 @@ impl InferenceBackend for SimulatedBackend {
         // Deterministic simulation: echo the payload.
         Ok(payload.to_string())
     }
+
+    fn oracle(&self, name: &str, _args: &[String]) -> Result<String> {
+        // Deterministic simulation: return a placeholder.
+        Ok(format!("<oracle:{name}>"))
+    }
 }

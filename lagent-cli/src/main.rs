@@ -35,6 +35,14 @@ enum Command {
             help = "Context heap size in tokens"
         )]
         context: usize,
+        #[arg(
+            long,
+            default_value = "simulated",
+            help = "Inference backend: simulated | anthropic"
+        )]
+        backend: String,
+        #[arg(long, help = "Use temperature=0 for deterministic inference")]
+        deterministic: bool,
     },
     /// Check a .la source file for errors without compiling
     Check {
@@ -48,25 +56,55 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Build { input, output } => {
-            let source = std::fs::read_to_string(&input)?;
-            let bytecode = lagent_compiler::compile(&source)?;
+            let bytecode = lagent_compiler::compile_file(&input)?;
             let out = output.unwrap_or_else(|| input.with_extension("lbc"));
             std::fs::write(&out, &bytecode)?;
             println!("Compiled {} -> {}", input.display(), out.display());
         }
-        Command::Run { input, context } => {
-            let source = std::fs::read_to_string(&input)?;
-            let bytecode = lagent_compiler::compile(&source)?;
-            let backend = Box::new(lagent_vm::backends::SimulatedBackend::new("ok"));
-            let mut vm = lagent_vm::Vm::new(context, backend);
+        Command::Run {
+            input,
+            context,
+            backend,
+            deterministic,
+        } => {
+            let bytecode = lagent_compiler::compile_file(&input)?;
+            let backend_impl = build_backend(&backend, deterministic)?;
+            let mut vm = lagent_vm::Vm::new(context, backend_impl);
             vm.execute(&bytecode)?;
         }
         Command::Check { input } => {
-            let source = std::fs::read_to_string(&input)?;
-            lagent_compiler::compile(&source)?;
+            lagent_compiler::compile_file(&input)?;
             println!("ok {} -- no errors", input.display());
         }
     }
 
     Ok(())
+}
+
+fn build_backend(
+    name: &str,
+    deterministic: bool,
+) -> Result<Box<dyn lagent_vm::backends::InferenceBackend>> {
+    match name {
+        "anthropic" => {
+            #[cfg(feature = "backend-remote")]
+            {
+                let key = std::env::var("LAGENT_API_KEY").map_err(|_| {
+                    anyhow::anyhow!("LAGENT_API_KEY must be set for --backend anthropic")
+                })?;
+                Ok(Box::new(lagent_vm::backends::AnthropicBackend::new(
+                    key,
+                    deterministic,
+                )))
+            }
+            #[cfg(not(feature = "backend-remote"))]
+            {
+                let _ = deterministic;
+                anyhow::bail!(
+                    "recompile with --features backend-remote to use the Anthropic backend"
+                )
+            }
+        }
+        _ => Ok(Box::new(lagent_vm::backends::SimulatedBackend::new("ok"))),
+    }
 }

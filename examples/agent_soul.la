@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: Apache-2.0
+// Example: Phase 4 agent vocabulary — soul, skill, instruction, spell,
+// memory, oracle, constraint, lore.
+
+type Mood = semantic("happy", "sad", "neutral");
+
+soul {
+    instruction "You are a helpful sentiment analysis agent.";
+    instruction "Always respond concisely.";
+}
+
+lore Background = "This agent analyses user-provided text for emotional tone.";
+
+memory LastResult: str = "";
+
+oracle FetchContext(url: str) -> str;
+
+constraint PositiveOnly {
+    verify(result != "sad");
+}
+
+skill AnalyseMood(text: str) -> Mood {
+    observe(text);
+    reason("Classify the mood of the text");
+    let result: Mood = infer(text);
+    verify(result != "");
+    return result;
+}
+
+fn main() {
+    let ctx = ctx_alloc(1024);
+    ctx_append(ctx, "I love this project, it is amazing!");
+    let mood = AnalyseMood(ctx);
+    println(mood);
+    ctx_free(ctx);
+}

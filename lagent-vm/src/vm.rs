@@ -39,6 +39,12 @@ impl std::fmt::Display for Value {
 pub struct Vm {
     heap: TokenHeap,
     backend: Box<dyn InferenceBackend>,
+    /// Soul identity metadata set by `SetAgentMeta`.
+    soul_meta: Option<String>,
+    /// Persistent memory slots allocated by `AllocMemorySlot`.
+    memory: HashMap<String, Value>,
+    /// Lore table populated by `StoreLore`.
+    lore: HashMap<String, String>,
 }
 
 impl Vm {
@@ -47,6 +53,9 @@ impl Vm {
         Self {
             heap: TokenHeap::new(heap_capacity),
             backend,
+            soul_meta: None,
+            memory: HashMap::new(),
+            lore: HashMap::new(),
         }
     }
 
@@ -78,11 +87,14 @@ impl Vm {
                     frame.locals.insert(name.clone(), val);
                 }
                 OpCode::LoadLocal(name) => {
-                    let val = frame
-                        .locals
-                        .get(name)
-                        .ok_or_else(|| anyhow!("undefined local: `{name}`"))?
-                        .clone();
+                    // Check memory slots as a fallback for Ident-based access.
+                    let val = if let Some(v) = frame.locals.get(name) {
+                        v.clone()
+                    } else if let Some(v) = self.memory.get(name) {
+                        v.clone()
+                    } else {
+                        return Err(anyhow!("undefined local: `{name}`"));
+                    };
                     frame.push(val);
                 }
 
@@ -106,8 +118,22 @@ impl Vm {
                     let compressed = self.backend.compress(&content)?;
                     self.heap.set_content(handle, compressed)?;
                 }
-                // No-op in Phase 1-3: register-indexed resize and reason annotation.
-                OpCode::CtxResize(_, _) | OpCode::Reason(_) => {}
+                OpCode::CtxShare => {
+                    // Duplicate TOS ctx handle — both references refer to the same segment.
+                    let handle = frame
+                        .stack
+                        .last()
+                        .cloned()
+                        .ok_or_else(|| anyhow!("stack underflow"))?;
+                    frame.push(handle);
+                }
+                // No-ops: register-indexed resize, reason annotation, skill registration,
+                // and constraint markers (Phase 4 stubs).
+                OpCode::CtxResize(_, _)
+                | OpCode::Reason(_)
+                | OpCode::RegisterSkill(_)
+                | OpCode::BeginConstraint(_)
+                | OpCode::EndConstraint => {}
 
                 // ── I/O ───────────────────────────────────────────────────
                 OpCode::Println => {
@@ -161,16 +187,17 @@ impl Vm {
                     let results = self.backend.classify(&prompt, labels)?;
                     let winner = results
                         .into_iter()
-                        .max_by(|a, b| {
-                            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-                        })
+                        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
                         .map_or_else(String::new, |(label, _)| label);
                     frame.push(Value::Str(winner));
                 }
 
-                OpCode::BranchClassify { var, cases, default } => {
-                    let all_labels: Vec<String> =
-                        cases.iter().map(|(l, _, _)| l.clone()).collect();
+                OpCode::BranchClassify {
+                    var,
+                    cases,
+                    default,
+                } => {
+                    let all_labels: Vec<String> = cases.iter().map(|(l, _, _)| l.clone()).collect();
                     let prompt = frame
                         .locals
                         .get(var)
@@ -240,6 +267,53 @@ impl Vm {
                 }
                 OpCode::EndInterruptible => {
                     frame.checkpoint = None;
+                }
+
+                // ── Phase 4: agent vocabulary ─────────────────────────────
+                OpCode::SetAgentMeta(s) => {
+                    self.soul_meta = Some(s.clone());
+                }
+
+                OpCode::CtxAppendLiteral(s) => {
+                    // Append to the ctx handle stored in the current frame locals, if any.
+                    if let Some(Value::CtxHandle(id)) = frame.locals.get("ctx").cloned() {
+                        self.heap.append(id, s)?;
+                    }
+                    // No-op when no ctx is in scope yet (e.g. soul fires before ctx_alloc).
+                }
+
+                OpCode::AllocMemorySlot(name) | OpCode::StoreMemory(name) => {
+                    let val = frame.pop()?;
+                    self.memory.insert(name.clone(), val);
+                }
+
+                OpCode::LoadMemory(name) => {
+                    let val = self
+                        .memory
+                        .get(name)
+                        .cloned()
+                        .unwrap_or(Value::Str(String::new()));
+                    frame.push(val);
+                }
+
+                OpCode::CallOracle(name, arity) => {
+                    let mut arg_strs: Vec<String> = Vec::new();
+                    for _ in 0..*arity {
+                        let v = frame.pop()?;
+                        arg_strs.push(v.to_string());
+                    }
+                    arg_strs.reverse(); // restore original argument order
+                    let result = self.backend.oracle(name, &arg_strs)?;
+                    frame.push(Value::Str(result));
+                }
+
+                OpCode::StoreLore(name, text) => {
+                    self.lore.insert(name.clone(), text.clone());
+                }
+
+                OpCode::LoadLore(name) => {
+                    let text = self.lore.get(name).cloned().unwrap_or_default();
+                    frame.push(Value::Str(text));
                 }
             }
         }
@@ -482,6 +556,66 @@ fn main() {
             println("default");
         }
     }
+}
+"#;
+        let bytes = lagent_compiler::compile(src).unwrap();
+        make_vm().execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn executes_oracle_call() {
+        let src = r#"
+oracle FetchContext(url: str) -> str;
+fn main() {
+    let r = FetchContext("http://example.com");
+    println(r);
+}
+"#;
+        let bytes = lagent_compiler::compile(src).unwrap();
+        make_vm().execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn memory_slot_persists() {
+        let src = r#"
+memory Counter: str = "initial";
+fn main() {
+    println(Counter);
+}
+"#;
+        let bytes = lagent_compiler::compile(src).unwrap();
+        make_vm().execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn executes_agent_soul() {
+        let src = r#"
+type Mood = semantic("happy", "sad", "neutral");
+
+soul {
+    instruction "You are a helpful sentiment analysis agent.";
+}
+
+lore Background = "This agent analyses user-provided text.";
+
+memory LastResult: str = "";
+
+oracle FetchContext(url: str) -> str;
+
+skill AnalyseMood(text: str) -> Mood {
+    observe(text);
+    reason("Classify the mood of the text");
+    let result: Mood = infer(text);
+    verify(result != "");
+    return result;
+}
+
+fn main() {
+    let ctx = ctx_alloc(1024);
+    ctx_append(ctx, "I love this project, it is amazing!");
+    let mood = AnalyseMood(ctx);
+    println(mood);
+    ctx_free(ctx);
 }
 "#;
         let bytes = lagent_compiler::compile(src).unwrap();
