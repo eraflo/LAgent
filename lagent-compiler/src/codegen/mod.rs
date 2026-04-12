@@ -3,10 +3,10 @@
 
 pub mod opcodes;
 
-use crate::parser::ast::{self as ast, Expr, Item, Stmt, TypeExpr};
+use crate::parser::ast::{self as ast, Block, Expr, Item, Stmt, TypeExpr};
 use crate::semantic::TypedAst;
 use anyhow::{anyhow, Result};
-use opcodes::{Bytecode, KernelBytecode, OpCode};
+use opcodes::{Bytecode, ExportEntry, ExportKind, KernelBytecode, LibraryBundle, OpCode};
 use std::collections::{HashMap, HashSet};
 
 /// Generate bytecode from the typed AST.
@@ -15,8 +15,88 @@ use std::collections::{HashMap, HashSet};
 ///
 /// Returns an error if an unsupported AST construct is encountered.
 pub fn generate(ast: TypedAst) -> Result<Vec<u8>> {
+    let bytecode = generate_bytecode(&ast, false)?;
+    let encoded = bincode::serialize(&bytecode)?;
+    Ok(encoded)
+}
+
+/// Generate a `.lalb` library bundle from the typed AST.
+///
+/// Only `pub` items are included in the export table.
+///
+/// # Errors
+///
+/// Returns an error if an unsupported AST construct is encountered.
+pub fn generate_lib(ast: TypedAst, lib_name: &str) -> Result<Vec<u8>> {
+    let bytecode = generate_bytecode(&ast, true)?;
+
+    // Build the export table from pub items.
+    let mut exports: Vec<ExportEntry> = Vec::new();
+    for item in &ast.items {
+        match item {
+            Item::KernelDef(k) if k.is_pub => {
+                let kernel_idx = bytecode
+                    .kernels
+                    .iter()
+                    .position(|kb| kb.name == k.name)
+                    .map_or(u16::MAX, |i| i as u16);
+                exports.push(ExportEntry {
+                    name: k.name.clone(),
+                    kind: ExportKind::Kernel,
+                    kernel_idx,
+                });
+            }
+            Item::SpellDef(s) if s.is_pub => {
+                let kernel_idx = bytecode
+                    .kernels
+                    .iter()
+                    .position(|kb| kb.name == s.name)
+                    .map_or(u16::MAX, |i| i as u16);
+                exports.push(ExportEntry {
+                    name: s.name.clone(),
+                    kind: ExportKind::Kernel,
+                    kernel_idx,
+                });
+            }
+            Item::SkillDef(s) if s.is_pub => {
+                let kernel_idx = bytecode
+                    .kernels
+                    .iter()
+                    .position(|kb| kb.name == s.name)
+                    .map_or(u16::MAX, |i| i as u16);
+                exports.push(ExportEntry {
+                    name: s.name.clone(),
+                    kind: ExportKind::Kernel,
+                    kernel_idx,
+                });
+            }
+            Item::LoreDecl(l) if l.is_pub => {
+                exports.push(ExportEntry {
+                    name: l.name.clone(),
+                    kind: ExportKind::Lore,
+                    kernel_idx: u16::MAX,
+                });
+            }
+            Item::OracleDecl(o) if o.is_pub => {
+                exports.push(ExportEntry {
+                    name: o.name.clone(),
+                    kind: ExportKind::Oracle,
+                    kernel_idx: u16::MAX,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    let bundle = LibraryBundle::new(lib_name.to_string(), bytecode, exports);
+    let encoded = bincode::serialize(&bundle)?;
+    Ok(encoded)
+}
+
+fn generate_bytecode(ast: &TypedAst, _lib_mode: bool) -> Result<Bytecode> {
     let type_env = ast.type_env.clone();
     let oracle_set: HashSet<String> = ast.oracle_names.iter().cloned().collect();
+    let constraint_bodies = ast.constraint_bodies.clone();
 
     // Find the soul definition (at most one), if present.
     let soul_def = ast.items.iter().find_map(|item| {
@@ -45,8 +125,12 @@ pub fn generate(ast: TypedAst) -> Result<Vec<u8>> {
                 #[allow(clippy::cast_possible_truncation)]
                 let idx = kernels.len() as u16;
                 kernel_index.insert(k.name.clone(), idx);
-                let mut gen =
-                    Codegen::new(type_env.clone(), kernel_index.clone(), oracle_set.clone());
+                let mut gen = Codegen::new(
+                    type_env.clone(),
+                    kernel_index.clone(),
+                    oracle_set.clone(),
+                    constraint_bodies.clone(),
+                );
                 gen.emit_block(&k.body)?;
                 kernels.push(KernelBytecode {
                     name: k.name.clone(),
@@ -59,8 +143,12 @@ pub fn generate(ast: TypedAst) -> Result<Vec<u8>> {
                 #[allow(clippy::cast_possible_truncation)]
                 let idx = kernels.len() as u16;
                 kernel_index.insert(s.name.clone(), idx);
-                let mut gen =
-                    Codegen::new(type_env.clone(), kernel_index.clone(), oracle_set.clone());
+                let mut gen = Codegen::new(
+                    type_env.clone(),
+                    kernel_index.clone(),
+                    oracle_set.clone(),
+                    constraint_bodies.clone(),
+                );
                 gen.emit_block(&s.body)?;
                 kernels.push(KernelBytecode {
                     name: s.name.clone(),
@@ -73,8 +161,12 @@ pub fn generate(ast: TypedAst) -> Result<Vec<u8>> {
                 #[allow(clippy::cast_possible_truncation)]
                 let idx = kernels.len() as u16;
                 kernel_index.insert(s.name.clone(), idx);
-                let mut gen =
-                    Codegen::new(type_env.clone(), kernel_index.clone(), oracle_set.clone());
+                let mut gen = Codegen::new(
+                    type_env.clone(),
+                    kernel_index.clone(),
+                    oracle_set.clone(),
+                    constraint_bodies.clone(),
+                );
                 gen.emit_block(&s.body)?;
                 kernels.push(KernelBytecode {
                     name: s.name.clone(),
@@ -88,7 +180,7 @@ pub fn generate(ast: TypedAst) -> Result<Vec<u8>> {
     }
 
     // ── Pass 2: compile fn/skill/memory/oracle into the main instruction stream ─
-    let mut gen = Codegen::new(type_env, kernel_index, oracle_set);
+    let mut gen = Codegen::new(type_env, kernel_index, oracle_set, constraint_bodies);
 
     // Emit lore pre-ops before any fn body.
     for op in pre_ops {
@@ -103,29 +195,17 @@ pub fn generate(ast: TypedAst) -> Result<Vec<u8>> {
         }
     }
 
-    for item in ast.items {
-        match item {
-            Item::FnDef(f) => {
-                // Emit the soul preamble before `fn main`.
-                if f.name == "main" {
-                    if let Some(ref soul) = soul_def {
-                        gen.emit(OpCode::SetAgentMeta("soul".to_string()));
-                        gen.emit_block(&soul.body)?;
-                    }
+    for item in ast.items.iter() {
+        if let Item::FnDef(f) = item {
+            // Emit the soul preamble before `fn main`.
+            if f.name == "main" {
+                if let Some(ref soul) = soul_def {
+                    gen.emit(OpCode::SetAgentMeta("soul".to_string()));
+                    gen.emit_block(&soul.body)?;
                 }
-                gen.emit_block(&f.body)?;
-                gen.emit(OpCode::Halt);
             }
-            Item::KernelDef(_)
-            | Item::SpellDef(_)
-            | Item::SkillDef(_)
-            | Item::TypeAlias(_)
-            | Item::SoulDef(_)
-            | Item::MemoryDecl(_)
-            | Item::OracleDecl(_)
-            | Item::ConstraintDef(_)
-            | Item::LoreDecl(_)
-            | Item::UseDecl(_) => {}
+            gen.emit_block(&f.body)?;
+            gen.emit(OpCode::Halt);
         }
     }
 
@@ -133,9 +213,7 @@ pub fn generate(ast: TypedAst) -> Result<Vec<u8>> {
         gen.emit(OpCode::Halt);
     }
 
-    let bytecode = Bytecode::new(kernels, gen.ops);
-    let encoded = bincode::serialize(&bytecode)?;
-    Ok(encoded)
+    Ok(Bytecode::new(kernels, gen.ops))
 }
 
 // ── Internal code-generation state ───────────────────────────────────────────
@@ -145,6 +223,11 @@ struct Codegen {
     type_env: HashMap<String, Vec<String>>,
     kernel_index: HashMap<String, u16>,
     oracle_set: HashSet<String>,
+    /// Constraint name → body block, used for `apply ConstraintName;` inlining.
+    constraint_bodies: HashMap<String, Block>,
+    /// When `true`, `verify(...)` emits `ConstraintVerify` (non-retriable)
+    /// instead of `VerifyStep` (retriable via kernel retry loop).
+    in_constraint: bool,
 }
 
 impl Codegen {
@@ -152,12 +235,15 @@ impl Codegen {
         type_env: HashMap<String, Vec<String>>,
         kernel_index: HashMap<String, u16>,
         oracle_set: HashSet<String>,
+        constraint_bodies: HashMap<String, Block>,
     ) -> Self {
         Self {
             ops: Vec::new(),
             type_env,
             kernel_index,
             oracle_set,
+            constraint_bodies,
+            in_constraint: false,
         }
     }
 
@@ -229,6 +315,20 @@ impl Codegen {
             // instruction "text"; — append literal to in-scope ctx handle.
             Stmt::Instruction(text) => {
                 self.emit(OpCode::CtxAppendLiteral(text.clone()));
+            }
+
+            // apply ConstraintName; — inline constraint body at this call site.
+            Stmt::Apply(name) => {
+                let body = self
+                    .constraint_bodies
+                    .get(name)
+                    .ok_or_else(|| anyhow!("unknown constraint `{name}`"))?
+                    .clone();
+                self.emit(OpCode::BeginConstraint(name.clone()));
+                self.in_constraint = true;
+                self.emit_block(&body)?;
+                self.in_constraint = false;
+                self.emit(OpCode::EndConstraint);
             }
         }
         Ok(())
@@ -319,11 +419,28 @@ impl Codegen {
             }
             "verify" => {
                 self.emit_expr(arg(args, 0, "verify")?)?;
-                self.emit(OpCode::VerifyStep);
+                if self.in_constraint {
+                    self.emit(OpCode::ConstraintVerify);
+                } else {
+                    self.emit(OpCode::VerifyStep);
+                }
             }
             "infer" => {
                 self.emit_expr(arg(args, 0, "infer")?)?;
                 self.emit(OpCode::InferClassify(vec![]));
+            }
+            "memory_load" => {
+                self.emit_expr(arg(args, 0, "memory_load")?)?;
+                self.emit(OpCode::PersistLoad);
+            }
+            "memory_save" => {
+                self.emit_expr(arg(args, 0, "memory_save")?)?;
+                self.emit_expr(arg(args, 1, "memory_save")?)?;
+                self.emit(OpCode::PersistSave);
+            }
+            "memory_delete" => {
+                self.emit_expr(arg(args, 0, "memory_delete")?)?;
+                self.emit(OpCode::PersistDelete);
             }
             _ => {
                 // Unknown call — emit args only (no call frame).

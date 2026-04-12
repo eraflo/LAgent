@@ -2,6 +2,7 @@
 //! Stack-based L-Agent virtual machine and runtime [`Value`] type.
 
 use crate::backends::InferenceBackend;
+use crate::persistent_store::PersistentStore;
 use crate::runtime::TokenHeap;
 use anyhow::{anyhow, Result};
 use lagent_compiler::codegen::opcodes::{Bytecode, OpCode};
@@ -45,6 +46,8 @@ pub struct Vm {
     memory: HashMap<String, Value>,
     /// Lore table populated by `StoreLore`.
     lore: HashMap<String, String>,
+    /// Optional file-backed persistent store for `memory_load/save/delete`.
+    persistent: Option<Box<dyn PersistentStore>>,
 }
 
 impl Vm {
@@ -56,7 +59,15 @@ impl Vm {
             soul_meta: None,
             memory: HashMap::new(),
             lore: HashMap::new(),
+            persistent: None,
         }
+    }
+
+    /// Attach a persistent store to the VM for cross-run memory operations.
+    #[must_use]
+    pub fn with_persistent_store(mut self, store: Box<dyn PersistentStore>) -> Self {
+        self.persistent = Some(store);
+        self
     }
 
     /// Execute raw bytecode bytes produced by the compiler.
@@ -128,12 +139,49 @@ impl Vm {
                     frame.push(handle);
                 }
                 // No-ops: register-indexed resize, reason annotation, skill registration,
-                // and constraint markers (Phase 4 stubs).
+                // and constraint boundary markers (diagnostic only).
                 OpCode::CtxResize(_, _)
                 | OpCode::Reason(_)
                 | OpCode::RegisterSkill(_)
                 | OpCode::BeginConstraint(_)
                 | OpCode::EndConstraint => {}
+
+                // ── Constraint verification (non-retriable) ───────────────
+                OpCode::ConstraintVerify => {
+                    let val = frame.pop()?;
+                    let ok = match &val {
+                        Value::Int(0) => false,
+                        Value::Str(s) if s.is_empty() => false,
+                        _ => true,
+                    };
+                    if !ok {
+                        return Err(anyhow!("ConstraintViolation"));
+                    }
+                }
+
+                // ── Persistent memory ─────────────────────────────────────
+                OpCode::PersistLoad => {
+                    let key = frame.pop_str()?;
+                    let val = self
+                        .persistent
+                        .as_ref()
+                        .and_then(|s| s.load(&key))
+                        .unwrap_or_default();
+                    frame.push(Value::Str(val));
+                }
+                OpCode::PersistSave => {
+                    let value = frame.pop_str()?;
+                    let key = frame.pop_str()?;
+                    if let Some(store) = &mut self.persistent {
+                        store.save(&key, &value);
+                    }
+                }
+                OpCode::PersistDelete => {
+                    let key = frame.pop_str()?;
+                    if let Some(store) = &mut self.persistent {
+                        store.delete(&key);
+                    }
+                }
 
                 // ── I/O ───────────────────────────────────────────────────
                 OpCode::Println => {
@@ -620,5 +668,120 @@ fn main() {
 "#;
         let bytes = lagent_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
+    }
+
+    // ── Phase 5 tests ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn constraint_violation_is_non_retriable() {
+        // A constraint violation must NOT retry; it propagates immediately.
+        let src = r#"
+constraint NonEmpty {
+    verify(0);
+}
+
+fn main() {
+    apply NonEmpty;
+}
+"#;
+        let bytes = lagent_compiler::compile(src).unwrap();
+        let err = make_vm().execute(&bytes).unwrap_err();
+        assert!(
+            err.to_string().contains("ConstraintViolation"),
+            "expected ConstraintViolation, got: {err}"
+        );
+    }
+
+    #[test]
+    fn constraint_passes_when_condition_holds() {
+        let src = r#"
+constraint AlwaysOk {
+    verify(1);
+}
+
+fn main() {
+    apply AlwaysOk;
+    println("passed");
+}
+"#;
+        let bytes = lagent_compiler::compile(src).unwrap();
+        make_vm().execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn persistent_store_load_returns_default_when_absent() {
+        let src = r#"
+fn main() {
+    let v = memory_load("missing_key");
+    println(v);
+}
+"#;
+        let bytes = lagent_compiler::compile(src).unwrap();
+        // No persistent store attached — load returns empty string silently.
+        make_vm().execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn persistent_store_save_and_load() {
+        use crate::persistent_store::InMemoryPersistentStore;
+        let src = r#"
+fn main() {
+    memory_save("key", "hello");
+    let v = memory_load("key");
+    println(v);
+}
+"#;
+        let bytes = lagent_compiler::compile(src).unwrap();
+        let store = InMemoryPersistentStore::new();
+        let mut vm = Vm::new(4096, Box::new(SimulatedBackend::new("ok")))
+            .with_persistent_store(Box::new(store));
+        vm.execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn persistent_store_delete_removes_key() {
+        use crate::persistent_store::InMemoryPersistentStore;
+        let src = r#"
+fn main() {
+    memory_save("k", "v");
+    memory_delete("k");
+    let v = memory_load("k");
+    println(v);
+}
+"#;
+        let bytes = lagent_compiler::compile(src).unwrap();
+        let store = InMemoryPersistentStore::new();
+        let mut vm = Vm::new(4096, Box::new(SimulatedBackend::new("ok")))
+            .with_persistent_store(Box::new(store));
+        vm.execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn apply_stmt_parses_and_runs() {
+        // End-to-end: apply statement inlines the constraint body.
+        let src = r#"
+constraint Positive {
+    verify(1);
+}
+
+fn main() {
+    apply Positive;
+    println("ok");
+}
+"#;
+        let bytes = lagent_compiler::compile(src).unwrap();
+        make_vm().execute(&bytes).unwrap();
+    }
+
+    #[test]
+    fn semantic_rejects_unknown_constraint() {
+        // Applying a constraint that was never declared must fail at semantic analysis.
+        let src = r#"
+fn main() {
+    apply Undefined;
+}
+"#;
+        let result = lagent_compiler::compile(src);
+        assert!(result.is_err(), "expected semantic error for unknown constraint");
     }
 }

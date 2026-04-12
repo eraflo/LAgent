@@ -32,6 +32,7 @@ pub struct FnDef {
     pub params: Vec<Param>,
     pub return_type: Option<TypeExpr>,
     pub body: Block,
+    pub is_pub: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -40,12 +41,14 @@ pub struct KernelDef {
     pub params: Vec<Param>,
     pub return_type: TypeExpr,
     pub body: Block,
+    pub is_pub: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct TypeAlias {
     pub name: String,
     pub def: TypeExpr,
+    pub is_pub: bool,
 }
 
 // ── Phase 4 structs ───────────────────────────────────────────────────────────
@@ -63,6 +66,7 @@ pub struct SpellDef {
     pub params: Vec<Param>,
     pub ret: TypeExpr,
     pub body: Block,
+    pub is_pub: bool,
 }
 
 /// `[pub] skill Name(params) [-> T] { body }` — annotated capability function.
@@ -89,6 +93,7 @@ pub struct OracleDecl {
     pub name: String,
     pub params: Vec<Param>,
     pub ret: TypeExpr,
+    pub is_pub: bool,
 }
 
 /// `constraint Name { body }` — named invariant guard.
@@ -96,6 +101,7 @@ pub struct OracleDecl {
 pub struct ConstraintDef {
     pub name: String,
     pub body: Block,
+    pub is_pub: bool,
 }
 
 /// `lore Name = "text";` — named static knowledge string.
@@ -103,6 +109,7 @@ pub struct ConstraintDef {
 pub struct LoreDecl {
     pub name: String,
     pub value: String,
+    pub is_pub: bool,
 }
 
 /// `use "path";` — module import.
@@ -146,6 +153,8 @@ pub enum Stmt {
     Interruptible(Block),
     /// Injects a literal string into the active context (inside `soul` / `skill` bodies).
     Instruction(String),
+    /// `apply ConstraintName;` — inline a named constraint body at this call site.
+    Apply(String),
 }
 
 #[derive(Debug, Clone)]

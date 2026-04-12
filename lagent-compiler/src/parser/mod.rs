@@ -113,6 +113,9 @@ fn expr() -> impl Parser<Token, Expr, Error = Simple<Token>> {
                     | Token::Act
                     | Token::Verify
                     | Token::Infer
+                    | Token::MemoryLoad
+                    | Token::MemorySave
+                    | Token::MemoryDelete
             )
         })
         .map(|t| match t {
@@ -128,6 +131,9 @@ fn expr() -> impl Parser<Token, Expr, Error = Simple<Token>> {
             Token::Act => "act".to_string(),
             Token::Verify => "verify".to_string(),
             Token::Infer => "infer".to_string(),
+            Token::MemoryLoad => "memory_load".to_string(),
+            Token::MemorySave => "memory_save".to_string(),
+            Token::MemoryDelete => "memory_delete".to_string(),
             _ => unreachable!(),
         })
         .then(args.clone())
@@ -257,7 +263,14 @@ fn stmt() -> impl Parser<Token, Stmt, Error = Simple<Token>> {
             .ignore_then(block_inner.clone())
             .map(Stmt::Interruptible);
 
+        // apply ConstraintName;
+        let apply_stmt = just(Token::Apply)
+            .ignore_then(ident())
+            .then_ignore(just(Token::Semi))
+            .map(Stmt::Apply);
+
         instruction_stmt
+            .or(apply_stmt)
             .or(let_stmt)
             .or(return_stmt)
             .or(branch_stmt)
@@ -292,45 +305,57 @@ fn params() -> impl Parser<Token, Vec<Param>, Error = Simple<Token>> {
 fn fn_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
     just(Token::Pub)
         .or_not()
-        .ignore_then(just(Token::Fn))
-        .ignore_then(ident())
+        .then_ignore(just(Token::Fn))
+        .then(ident())
         .then(params())
         .then(just(Token::Arrow).ignore_then(type_expr()).or_not())
         .then(block())
-        .map(|(((name, params), return_type), body)| {
+        .map(|((((is_pub_opt, name), params), return_type), body)| {
             Item::FnDef(FnDef {
                 name,
                 params,
                 return_type,
                 body,
+                is_pub: is_pub_opt.is_some(),
             })
         })
 }
 
 fn kernel_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
-    just(Token::Kernel)
-        .ignore_then(ident())
+    just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Kernel))
+        .then(ident())
         .then(params())
         .then_ignore(just(Token::Arrow))
         .then(type_expr())
         .then(block())
-        .map(|(((name, params), return_type), body)| {
+        .map(|((((is_pub_opt, name), params), return_type), body)| {
             Item::KernelDef(KernelDef {
                 name,
                 params,
                 return_type,
                 body,
+                is_pub: is_pub_opt.is_some(),
             })
         })
 }
 
 fn type_alias() -> impl Parser<Token, Item, Error = Simple<Token>> {
-    just(Token::Type)
-        .ignore_then(ident())
+    just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Type))
+        .then(ident())
         .then_ignore(just(Token::Assign))
         .then(type_expr())
         .then_ignore(just(Token::Semi))
-        .map(|(name, def)| Item::TypeAlias(TypeAlias { name, def }))
+        .map(|((is_pub_opt, name), def)| {
+            Item::TypeAlias(TypeAlias {
+                name,
+                def,
+                is_pub: is_pub_opt.is_some(),
+            })
+        })
 }
 
 // ── Phase 4 top-level parsers ─────────────────────────────────────────────────
@@ -342,18 +367,21 @@ fn soul_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
 }
 
 fn spell_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
-    just(Token::Spell)
-        .ignore_then(ident())
+    just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Spell))
+        .then(ident())
         .then(params())
         .then_ignore(just(Token::Arrow))
         .then(type_expr())
         .then(block())
-        .map(|(((name, params), ret), body)| {
+        .map(|((((is_pub_opt, name), params), ret), body)| {
             Item::SpellDef(SpellDef {
                 name,
                 params,
                 ret,
                 body,
+                is_pub: is_pub_opt.is_some(),
             })
         })
 }
@@ -389,29 +417,54 @@ fn memory_decl() -> impl Parser<Token, Item, Error = Simple<Token>> {
 }
 
 fn oracle_decl() -> impl Parser<Token, Item, Error = Simple<Token>> {
-    just(Token::Oracle)
-        .ignore_then(ident())
+    just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Oracle))
+        .then(ident())
         .then(params())
         .then_ignore(just(Token::Arrow))
         .then(type_expr())
         .then_ignore(just(Token::Semi))
-        .map(|((name, params), ret)| Item::OracleDecl(OracleDecl { name, params, ret }))
+        .map(|(((is_pub_opt, name), params), ret)| {
+            Item::OracleDecl(OracleDecl {
+                name,
+                params,
+                ret,
+                is_pub: is_pub_opt.is_some(),
+            })
+        })
 }
 
 fn constraint_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
-    just(Token::Constraint)
-        .ignore_then(ident())
+    just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Constraint))
+        .then(ident())
         .then(block())
-        .map(|(name, body)| Item::ConstraintDef(ConstraintDef { name, body }))
+        .map(|((is_pub_opt, name), body)| {
+            Item::ConstraintDef(ConstraintDef {
+                name,
+                body,
+                is_pub: is_pub_opt.is_some(),
+            })
+        })
 }
 
 fn lore_decl() -> impl Parser<Token, Item, Error = Simple<Token>> {
-    just(Token::Lore)
-        .ignore_then(ident())
+    just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Lore))
+        .then(ident())
         .then_ignore(just(Token::Assign))
         .then(str_inner())
         .then_ignore(just(Token::Semi))
-        .map(|(name, value)| Item::LoreDecl(LoreDecl { name, value }))
+        .map(|((is_pub_opt, name), value)| {
+            Item::LoreDecl(LoreDecl {
+                name,
+                value,
+                is_pub: is_pub_opt.is_some(),
+            })
+        })
 }
 
 fn use_decl() -> impl Parser<Token, Item, Error = Simple<Token>> {

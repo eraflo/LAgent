@@ -64,6 +64,17 @@ pub enum Token {
     /// Declares a block of few-shot examples injected before inference.
     #[token("lore")]
     Lore,
+    /// Inlines a named constraint body at the current call site.
+    #[token("apply")]
+    Apply,
+
+    // ── Persistent memory primitives ──────────────────────────────────────
+    #[token("memory_load")]
+    MemoryLoad,
+    #[token("memory_save")]
+    MemorySave,
+    #[token("memory_delete")]
+    MemoryDelete,
 
     // ── Kernel step primitives ─────────────────────────────────────────────
     #[token("observe")]

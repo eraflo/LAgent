@@ -2,7 +2,7 @@
 //! Semantic analysis: name resolution and basic constraint validation.
 
 use crate::parser::ast::{
-    ConstraintDef, Expr, FnDef, Item, KernelDef, SkillDef, SpellDef, Stmt, TypeExpr,
+    Block, ConstraintDef, Expr, FnDef, Item, KernelDef, SkillDef, SpellDef, Stmt, TypeExpr,
 };
 use anyhow::{anyhow, Result};
 use std::collections::{HashMap, HashSet};
@@ -18,6 +18,8 @@ pub struct TypedAst {
     pub oracle_names: Vec<String>,
     /// Lore name → text, passed to codegen for `StoreLore` emission.
     pub lore_table: HashMap<String, String>,
+    /// Constraint name → body block, for inline codegen (Phase 5).
+    pub constraint_bodies: HashMap<String, Block>,
 }
 
 /// Perform semantic analysis: name resolution and basic constraint validation.
@@ -30,12 +32,15 @@ pub fn analyze(items: Vec<Item>) -> Result<TypedAst> {
     let mut type_env: HashMap<String, Vec<String>> = HashMap::new();
     let mut oracle_names: Vec<String> = Vec::new();
     let mut lore_table: HashMap<String, String> = HashMap::new();
+    let mut constraint_bodies: HashMap<String, Block> = HashMap::new();
     // Names that are callable: fn/kernel/skill/spell/oracle.
     let mut callable_names: HashSet<String> = HashSet::new();
     // Names that are memory slots (valid as identifiers).
     let mut memory_names: HashSet<String> = HashSet::new();
     // Names that are lore keys (valid as identifiers).
     let mut lore_names: HashSet<String> = HashSet::new();
+    // Names of declared constraints, for apply-statement resolution.
+    let mut constraint_names: HashSet<String> = HashSet::new();
 
     for item in &items {
         match item {
@@ -67,17 +72,29 @@ pub fn analyze(items: Vec<Item>) -> Result<TypedAst> {
                 lore_names.insert(l.name.clone());
                 lore_table.insert(l.name.clone(), l.value.clone());
             }
-            Item::SoulDef(_) | Item::ConstraintDef(_) | Item::UseDecl(_) => {}
+            Item::ConstraintDef(c) => {
+                constraint_names.insert(c.name.clone());
+                constraint_bodies.insert(c.name.clone(), c.body.clone());
+            }
+            Item::SoulDef(_) | Item::UseDecl(_) => {}
         }
     }
 
     // ── Name-check all bodies ─────────────────────────────────────────────
     for item in &items {
         match item {
-            Item::FnDef(f) => check_fn(f, &callable_names, &memory_names, &lore_names)?,
-            Item::KernelDef(k) => check_kernel(k, &callable_names, &memory_names, &lore_names)?,
-            Item::SkillDef(s) => check_skill(s, &callable_names, &memory_names, &lore_names)?,
-            Item::SpellDef(s) => check_spell(s, &callable_names, &memory_names, &lore_names)?,
+            Item::FnDef(f) => {
+                check_fn(f, &callable_names, &memory_names, &lore_names, &constraint_names)?;
+            }
+            Item::KernelDef(k) => {
+                check_kernel(k, &callable_names, &memory_names, &lore_names, &constraint_names)?;
+            }
+            Item::SkillDef(s) => {
+                check_skill(s, &callable_names, &memory_names, &lore_names, &constraint_names)?;
+            }
+            Item::SpellDef(s) => {
+                check_spell(s, &callable_names, &memory_names, &lore_names, &constraint_names)?;
+            }
             Item::SoulDef(s) => {
                 let mut scope = HashSet::new();
                 check_block(
@@ -86,6 +103,7 @@ pub fn analyze(items: Vec<Item>) -> Result<TypedAst> {
                     &callable_names,
                     &memory_names,
                     &lore_names,
+                    &constraint_names,
                 )?;
             }
             Item::MemoryDecl(m) => {
@@ -94,7 +112,7 @@ pub fn analyze(items: Vec<Item>) -> Result<TypedAst> {
             }
             Item::ConstraintDef(c) => {
                 // Constraint bodies may reference locals from the call site —
-                // skip name-checking in Phase 4 (inlined at call site in Phase 5).
+                // skip strict name-checking (inlined at call site).
                 check_constraint_relaxed(c);
             }
             Item::TypeAlias(_) | Item::OracleDecl(_) | Item::LoreDecl(_) | Item::UseDecl(_) => {}
@@ -106,6 +124,7 @@ pub fn analyze(items: Vec<Item>) -> Result<TypedAst> {
         type_env,
         oracle_names,
         lore_table,
+        constraint_bodies,
     })
 }
 
@@ -114,9 +133,10 @@ fn check_fn(
     callable: &HashSet<String>,
     memory: &HashSet<String>,
     lore: &HashSet<String>,
+    constraints: &HashSet<String>,
 ) -> Result<()> {
     let mut scope: HashSet<String> = f.params.iter().map(|p| p.name.clone()).collect();
-    check_block(&f.body, &mut scope, callable, memory, lore)
+    check_block(&f.body, &mut scope, callable, memory, lore, constraints)
 }
 
 fn check_kernel(
@@ -124,9 +144,10 @@ fn check_kernel(
     callable: &HashSet<String>,
     memory: &HashSet<String>,
     lore: &HashSet<String>,
+    constraints: &HashSet<String>,
 ) -> Result<()> {
     let mut scope: HashSet<String> = k.params.iter().map(|p| p.name.clone()).collect();
-    check_block(&k.body, &mut scope, callable, memory, lore)
+    check_block(&k.body, &mut scope, callable, memory, lore, constraints)
 }
 
 fn check_skill(
@@ -134,9 +155,10 @@ fn check_skill(
     callable: &HashSet<String>,
     memory: &HashSet<String>,
     lore: &HashSet<String>,
+    constraints: &HashSet<String>,
 ) -> Result<()> {
     let mut scope: HashSet<String> = s.params.iter().map(|p| p.name.clone()).collect();
-    check_block(&s.body, &mut scope, callable, memory, lore)
+    check_block(&s.body, &mut scope, callable, memory, lore, constraints)
 }
 
 fn check_spell(
@@ -144,12 +166,13 @@ fn check_spell(
     callable: &HashSet<String>,
     memory: &HashSet<String>,
     lore: &HashSet<String>,
+    constraints: &HashSet<String>,
 ) -> Result<()> {
     let mut scope: HashSet<String> = s.params.iter().map(|p| p.name.clone()).collect();
-    check_block(&s.body, &mut scope, callable, memory, lore)
+    check_block(&s.body, &mut scope, callable, memory, lore, constraints)
 }
 
-/// Constraint bodies may reference locals not yet in scope; skip name-checking in Phase 4.
+/// Constraint bodies may reference locals from the call site; skip strict name-checking.
 fn check_constraint_relaxed(_c: &ConstraintDef) {}
 
 fn check_block(
@@ -158,6 +181,7 @@ fn check_block(
     callable: &HashSet<String>,
     memory: &HashSet<String>,
     lore: &HashSet<String>,
+    constraints: &HashSet<String>,
 ) -> Result<()> {
     for stmt in block {
         match stmt {
@@ -172,19 +196,24 @@ fn check_block(
                 check_expr(&Expr::Ident(b.var.clone()), scope, callable, memory, lore)?;
                 for case in &b.cases {
                     let mut inner = scope.clone();
-                    check_block(&case.body, &mut inner, callable, memory, lore)?;
+                    check_block(&case.body, &mut inner, callable, memory, lore, constraints)?;
                 }
                 if let Some(default) = &b.default {
                     let mut inner = scope.clone();
-                    check_block(default, &mut inner, callable, memory, lore)?;
+                    check_block(default, &mut inner, callable, memory, lore, constraints)?;
                 }
             }
             Stmt::Interruptible(block) => {
                 let mut inner = scope.clone();
-                check_block(block, &mut inner, callable, memory, lore)?;
+                check_block(block, &mut inner, callable, memory, lore, constraints)?;
             }
             // instruction "text"; — always valid, no names to resolve.
             Stmt::Instruction(_) => {}
+            Stmt::Apply(name) => {
+                if !constraints.contains(name.as_str()) {
+                    return Err(anyhow!("undefined constraint: `{name}`"));
+                }
+            }
         }
     }
     Ok(())
@@ -239,6 +268,9 @@ fn is_builtin(name: &str) -> bool {
             | "act"
             | "verify"
             | "infer"
+            | "memory_load"
+            | "memory_save"
+            | "memory_delete"
             // built-in branch subjects
             | "intent"
     )

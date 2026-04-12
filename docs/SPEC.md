@@ -1,14 +1,15 @@
 # L-Agent Language Specification
 
-**Version 0.4 — April 2026**
+**Version 0.5 — April 2026**
 
 ## 1. Lexical Grammar
 
 ### 1.1 Keywords
 ```
-fn kernel branch case default type let return pub use interruptible
+fn kernel branch case default type let return pub use interruptible apply
 observe reason act verify infer
 ctx_alloc ctx_free ctx_append ctx_resize ctx_compress ctx_share
+memory_load memory_save memory_delete
 println semantic intent
 str bool u32 f32
 soul skill instruction spell memory oracle constraint lore
@@ -72,6 +73,7 @@ stmt        = let_stmt
             | branch_stmt
             | interruptible_stmt
             | instruction_stmt
+            | apply_stmt
             | expr_stmt ;
 
 let_stmt            = "let" IDENT (":" type_expr)? "=" expr ";" ;
@@ -80,6 +82,7 @@ branch_stmt         = "branch" IDENT "{" branch_case* ("default" "=>" block)? "}
 branch_case         = "case" STRING "(" "confidence" ">" FLOAT ")" "=>" block ;
 interruptible_stmt  = "interruptible" block ;
 instruction_stmt    = "instruction" STRING ";" ;
+apply_stmt          = "apply" IDENT ";" ;
 expr_stmt           = expr ";" ;
 
 expr        = call_expr | IDENT | STRING | INT | FLOAT | bin_expr ;
@@ -240,7 +243,7 @@ spell Summarise(text: str) -> str {
 
 ### 8.5 `memory` — Persistent Named Slot
 
-Declares a named slot that persists across context resets and kernel invocations within a single run. Initialized once at program start.
+Declares a named slot that persists across context resets and kernel invocations **within a single run**. Initialized once at program start.
 
 ```la
 memory LastResult: str = "";
@@ -248,7 +251,29 @@ memory LastResult: str = "";
 
 Memory slots are accessible as ordinary identifiers. Reads emit `LoadMemory(name)`; the initial value emits the expression followed by `AllocMemorySlot(name)`.
 
-*Note: persistence across program runs (file-backed) is planned for Phase 5.*
+For **cross-run persistence**, use the `memory_load` / `memory_save` / `memory_delete` built-in primitives (see §4).
+
+---
+
+### 8.5.1 Cross-Run Persistent Memory
+
+Three built-in functions provide access to a key-value store that survives program restarts when a persistent store is configured (e.g. via `lagent run --persist store.json`):
+
+| Primitive | Description |
+|---|---|
+| `memory_load(key: str) -> str` | Return persisted value, or `""` if absent |
+| `memory_save(key: str, value: str)` | Persist `value` under `key` |
+| `memory_delete(key: str)` | Remove `key` from the store |
+
+```la
+fn main() {
+    let count = memory_load("visits");
+    memory_save("visits", "updated");
+    println(count);
+}
+```
+
+If no persistent store is attached to the VM, `memory_save` and `memory_delete` are silent no-ops and `memory_load` returns `""`.
 
 ---
 
@@ -271,13 +296,24 @@ Emits `CallOracle(name, arity)` at call sites. The backend receives the name and
 
 ### 8.7 `constraint` — Named Guard Block
 
-Declares a named verification rule. In Phase 4, constraint bodies are parsed and name-checked but not enforced at runtime (no-op opcodes `BeginConstraint` / `EndConstraint`). Enforcement (inlining at call site) is planned for Phase 5.
+Declares a named verification rule. Use `apply ConstraintName;` to inline the constraint body at a call site. The `verify(...)` inside a constraint emits `ConstraintVerify`, which raises a non-retriable `ConstraintViolation` error — unlike kernel `verify(...)` which triggers the retry loop.
 
 ```la
-constraint PositiveOnly {
-    verify(result != "sad");
+constraint NonEmpty {
+    verify(result != "");
+}
+
+skill Summarise(text: str) -> str {
+    let result: str = infer(text);
+    apply NonEmpty;
+    return result;
 }
 ```
+
+At the bytecode level, `apply NonEmpty;` emits:
+1. `BeginConstraint("NonEmpty")` — diagnostic marker.
+2. The inlined constraint body (with `ConstraintVerify` instead of `VerifyStep`).
+3. `EndConstraint` — diagnostic marker.
 
 ---
 
@@ -310,22 +346,31 @@ Resolution rules:
 
 ### 9.2 Visibility
 
-The `pub` modifier is parsed on `fn`, `kernel`, `skill`, `spell`, `type`, `soul`, `oracle`, `constraint`, `lore`. Visibility enforcement (preventing access to private items across module boundaries) is planned for Phase 5.
+The `pub` modifier is supported on `fn`, `kernel`, `skill`, `spell`, `type`, `oracle`, `constraint`, `lore`. When a file is imported via `use`, only `pub` items are made visible in the importing scope. `SoulDef`, `MemoryDecl`, and `UseDecl` are never re-exported.
 
 ```la
-pub skill AnalyseMood(text: str) -> Mood { ... }
-pub fn helper() { ... }
+pub skill AnalyseMood(text: str) -> Mood { ... }  // visible to importers
+fn helper() { ... }                                // private — not exported
 ```
 
-### 9.3 Library Declaration (`lagent.toml`) — Planned (Phase 5)
+### 9.3 Library Declaration (`lagent.toml`)
 
 ```toml
+[project]
+name    = "my-agent"
+version = "0.1.0"
+entry   = "src/main.la"
+
 [lib]
 entry = "src/lib.la"
 name  = "my-agent-lib"
 ```
 
-`lagent build --lib` will produce `my-agent-lib.lalb` (bytecode + export table).
+`lagent build --lib` produces `my-agent-lib.lalb` — a precompiled bytecode bundle containing:
+- The compiled kernel table and main instruction stream.
+- An export table (`Vec<ExportEntry>`) listing only `pub` items.
+
+Magic header: `b"LALB"` (distinct from executable `.lbc` files which use `b"LAGN"`).
 
 ---
 
@@ -377,14 +422,22 @@ See `lagent-compiler/src/codegen/opcodes.rs` for the full `OpCode` enum.
 |--------|-------------|
 | `SetAgentMeta(s)` | Store soul identity string in VM |
 | `RegisterSkill(name)` | Metadata marker (no runtime effect) |
-| `AllocMemorySlot(name)` | Pop TOS → named persistent slot |
-| `LoadMemory(name)` | Push named memory slot value |
-| `StoreMemory(name)` | Pop TOS → named memory slot |
+| `AllocMemorySlot(name)` | Pop TOS → named in-run memory slot |
+| `LoadMemory(name)` | Push in-run memory slot value |
+| `StoreMemory(name)` | Pop TOS → in-run memory slot |
 | `CallOracle(name, arity)` | Pop N args; call backend oracle; push result |
-| `BeginConstraint(name)` | Mark constraint start (no-op Phase 4) |
-| `EndConstraint` | Mark constraint end (no-op Phase 4) |
+| `BeginConstraint(name)` | Mark constraint start (diagnostic) |
+| `EndConstraint` | Mark constraint end (diagnostic) |
+| `ConstraintVerify` | Pop TOS; non-retriable abort if falsy (`ConstraintViolation`) |
 | `StoreLore(name, text)` | Store lore string in VM lore table |
 | `LoadLore(name)` | Push lore string onto stack |
+
+### Persistent Memory
+| Opcode | Description |
+|--------|-------------|
+| `PersistLoad` | Pop key; push persisted value (or `""`) |
+| `PersistSave` | Pop value then key; persist the pair |
+| `PersistDelete` | Pop key; remove from persistent store |
 
 ### Arithmetic / Comparison
 | Opcode | Description |

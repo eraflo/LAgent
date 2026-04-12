@@ -111,6 +111,17 @@ pub enum OpCode {
     BeginConstraint(String),
     /// Mark the end of a constraint block.
     EndConstraint,
+    /// Pop TOS; if falsy, immediately abort with a non-retriable `ConstraintViolation` error.
+    /// Distinct from `VerifyStep` which triggers kernel retry logic.
+    ConstraintVerify,
+
+    // ── Phase 5: persistent memory ────────────────────────────────────────────
+    /// Pop TOS (key string); push the persisted value string, or empty str if absent.
+    PersistLoad,
+    /// Pop TOS (value string) then next (key string); persist the key-value pair.
+    PersistSave,
+    /// Pop TOS (key string); delete that key from the persistent store.
+    PersistDelete,
     /// Store a lore entry (`name → text`) in the VM lore table.
     StoreLore(String, String),
     /// Push a lore string by name onto the stack.
@@ -154,6 +165,63 @@ impl Bytecode {
             version: 1,
             kernels,
             instructions,
+        }
+    }
+}
+
+// ── Phase 5: Library Bundle (.lalb) ──────────────────────────────────────────
+
+/// Kind of an exported item in a `.lalb` library bundle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ExportKind {
+    /// A callable kernel, spell, or skill.
+    Kernel,
+    /// A static lore string.
+    Lore,
+    /// An oracle declaration stub.
+    Oracle,
+}
+
+/// A single export entry in a `.lalb` library bundle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportEntry {
+    /// Exported item name.
+    pub name: String,
+    /// Kind of export.
+    pub kind: ExportKind,
+    /// Index into `LibraryBundle::bytecode::kernels` for callable exports;
+    /// `u16::MAX` for non-kernel exports.
+    pub kernel_idx: u16,
+}
+
+/// A precompiled L-Agent library bundle (`.lalb`).
+///
+/// Contains the same executable bytecode as `.lbc` plus an export table that
+/// describes which items are visible to importing programs.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LibraryBundle {
+    /// Magic header — always `b"LALB"`.
+    pub magic: [u8; 4],
+    /// Bundle format version.
+    pub version: u16,
+    /// Library name (from `lagent.toml` or CLI flag).
+    pub name: String,
+    /// The compiled bytecode (kernels + instructions).
+    pub bytecode: Bytecode,
+    /// Export table: only `pub` items appear here.
+    pub exports: Vec<ExportEntry>,
+}
+
+impl LibraryBundle {
+    /// Create a new [`LibraryBundle`] with the standard magic header and version 1.
+    #[must_use]
+    pub fn new(name: String, bytecode: Bytecode, exports: Vec<ExportEntry>) -> Self {
+        Self {
+            magic: *b"LALB",
+            version: 1,
+            name,
+            bytecode,
+            exports,
         }
     }
 }

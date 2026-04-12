@@ -96,24 +96,31 @@ Target: L-Agent's distinct identity keywords, module imports, remote backend.
 
 ---
 
-## Phase 5 — Constraint Enforcement & Visibility (Next)
+## Phase 5 — Constraint Enforcement & Visibility ✅
 Target: `constraint` inlining at call sites, `pub` visibility, `lagent.toml`, persistent memory.
 
 ### Language
-- [ ] `constraint` bodies inlined at call site in codegen
-- [ ] `pub` visibility enforcement (private items not exported across module boundaries)
-- [ ] `lagent.toml` project file (`[lib]` entry, `name`)
-- [ ] `.lalb` (L-Agent Library Bundle): precompiled bytecode + export table
-- [ ] `memory_load` / `memory_save` / `memory_delete` built-in primitives
+- [x] `apply ConstraintName;` statement — inline constraint body at call site in codegen
+- [x] `ConstraintVerify` opcode — non-retriable guard (distinct from kernel `VerifyStep`)
+- [x] `pub` visibility enforcement (private items not exported across module boundaries)
+- [x] `lagent.toml` project file (`[lib]` entry, `name`) — `project.rs`
+- [x] `.lalb` (L-Agent Library Bundle): precompiled bytecode + export table — `LibraryBundle`
+- [x] `memory_load` / `memory_save` / `memory_delete` built-in primitives (persistent cross-run)
 
 ### VM
-- [ ] `BeginConstraint` / `EndConstraint` — enforce guard at runtime (non-retriable error)
-- [ ] Persistent memory backend (optional file-backed store)
+- [x] `ConstraintVerify` — non-retriable `ConstraintViolation` error (no retry loop)
+- [x] `PersistLoad` / `PersistSave` / `PersistDelete` opcodes
+- [x] `PersistentStore` trait + `FilePersistentStore` (JSON, atomic write-then-rename)
+- [x] `InMemoryPersistentStore` for testing
+- [x] `Vm::with_persistent_store()` builder
 
 ### Tooling
-- [ ] `lagent build --lib` produces `.lalb`
-- [ ] `lagent add <lib>` installs from a registry
-- [ ] `lagent fmt` — auto-formatter
+- [x] `lagent build --lib` produces `.lalb`
+- [x] `lagent build` auto-discovers `lagent.toml` when no input file is given
+- [x] `lagent run --persist <path>` attaches file-backed persistent store
+- [x] `lagent fmt` — auto-formatter (round-trip AST pretty-printer)
+- [x] `lagent fmt --check` — exit non-zero if file would change
+- [ ] `lagent add <lib>` installs from a registry (deferred to Phase 6)
 
 ---
 
@@ -149,5 +156,5 @@ Target: production-quality ecosystem.
 | v0.2      | Phase 2 — Semantic Types       | ✅ Complete |
 | v0.3      | Phase 3 — Kernel Frames        | ✅ Complete |
 | v0.4      | Phase 4 — Agent Vocabulary     | ✅ Complete |
-| v0.5      | Phase 5 — Constraints & Modules| In progress |
+| v0.5      | Phase 5 — Constraints & Modules| ✅ Complete |
 | v1.0      | Phase 6 — Production           | Planned     |

@@ -10,8 +10,10 @@
 )]
 
 pub mod backends;
+pub mod persistent_store;
 pub mod runtime;
 pub mod vm;
 
 pub use backends::InferenceBackend;
+pub use persistent_store::PersistentStore;
 pub use vm::Vm;
