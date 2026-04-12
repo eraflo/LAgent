@@ -70,15 +70,25 @@ impl GlobalEnv {
                         env.type_env.insert(ta.name.clone(), labels.clone());
                     }
                 }
-                Item::FnDef(f) => { env.callable_names.insert(f.name.clone()); }
-                Item::KernelDef(k) => { env.callable_names.insert(k.name.clone()); }
-                Item::SkillDef(s) => { env.callable_names.insert(s.name.clone()); }
-                Item::SpellDef(s) => { env.callable_names.insert(s.name.clone()); }
+                Item::FnDef(f) => {
+                    env.callable_names.insert(f.name.clone());
+                }
+                Item::KernelDef(k) => {
+                    env.callable_names.insert(k.name.clone());
+                }
+                Item::SkillDef(s) => {
+                    env.callable_names.insert(s.name.clone());
+                }
+                Item::SpellDef(s) => {
+                    env.callable_names.insert(s.name.clone());
+                }
                 Item::OracleDecl(o) => {
                     env.callable_names.insert(o.name.clone());
                     env.oracle_names.push(o.name.clone());
                 }
-                Item::MemoryDecl(m) => { env.memory_names.insert(m.name.clone()); }
+                Item::MemoryDecl(m) => {
+                    env.memory_names.insert(m.name.clone());
+                }
                 Item::LoreDecl(l) => {
                     env.lore_names.insert(l.name.clone());
                     env.lore_table.insert(l.name.clone(), l.value.clone());
@@ -94,8 +104,13 @@ impl GlobalEnv {
     }
 
     fn check_all(&self, items: &[Item]) -> Result<()> {
-        let Self { callable_names: callable, memory_names: memory, lore_names: lore,
-                   constraint_names: constraints, .. } = self;
+        let Self {
+            callable_names: callable,
+            memory_names: memory,
+            lore_names: lore,
+            constraint_names: constraints,
+            ..
+        } = self;
         for item in items {
             match item {
                 Item::FnDef(f) => check_fn(f, callable, memory, lore, constraints)?,
@@ -111,8 +126,8 @@ impl GlobalEnv {
                     check_expr(&m.init, &scope, callable, memory, lore)?;
                 }
                 Item::ConstraintDef(c) => check_constraint_relaxed(c),
-                Item::TypeAlias(_) | Item::OracleDecl(_) | Item::LoreDecl(_)
-                | Item::UseDecl(_) => {}
+                Item::TypeAlias(_) | Item::OracleDecl(_) | Item::LoreDecl(_) | Item::UseDecl(_) => {
+                }
             }
         }
         Ok(())
