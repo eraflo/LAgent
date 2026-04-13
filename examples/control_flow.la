@@ -1,0 +1,50 @@
+// Control flow examples: if/else, loop, while, break, continue, mut, const
+
+const THRESHOLD: f32 = 0.7;
+const MAX_ITERATIONS: u32 = 100;
+
+fn main() {
+    // if/else
+    let x = 42;
+    if x > 0 {
+        println("positive");
+    } else {
+        println("non-positive");
+    }
+
+    // Mutable variable with reassignment
+    let mut counter = 0;
+    counter = counter + 1;
+    counter = counter + 1;
+    println(counter);
+
+    // while loop
+    let mut i = 0;
+    while i < 3 {
+        println(i);
+        i = i + 1;
+    }
+
+    // loop with break
+    let mut n = 0;
+    loop {
+        n = n + 1;
+        if n > 5 {
+            break;
+        }
+        println(n);
+    }
+
+    // Const usage (evaluated at compile-time)
+    println(MAX_ITERATIONS);
+
+    // Nested if (logical operators via nesting)
+    if x > 0 {
+        if x < 100 {
+            println("x is in range");
+        }
+    }
+    if x == 42 {
+        println("x is interesting");
+    }
+}

@@ -4,7 +4,7 @@
 pub mod opcodes;
 
 use crate::parser::ast::{self as ast, Block, Expr, Item, Stmt, TypeExpr};
-use crate::semantic::TypedAst;
+use crate::semantic::{ConstValue, TypedAst};
 use anyhow::{anyhow, Result};
 use opcodes::{Bytecode, ExportEntry, ExportKind, KernelBytecode, LibraryBundle, OpCode};
 use std::collections::{HashMap, HashSet};
@@ -132,6 +132,7 @@ fn generate_bytecode(ast: &TypedAst, _lib_mode: bool) -> Result<Bytecode> {
                     kernel_index.clone(),
                     oracle_set.clone(),
                     constraint_bodies.clone(),
+                    ast.const_table.clone(),
                 );
                 gen.emit_block(&k.body)?;
                 kernels.push(KernelBytecode {
@@ -150,6 +151,7 @@ fn generate_bytecode(ast: &TypedAst, _lib_mode: bool) -> Result<Bytecode> {
                     kernel_index.clone(),
                     oracle_set.clone(),
                     constraint_bodies.clone(),
+                    ast.const_table.clone(),
                 );
                 gen.emit_block(&s.body)?;
                 kernels.push(KernelBytecode {
@@ -168,6 +170,7 @@ fn generate_bytecode(ast: &TypedAst, _lib_mode: bool) -> Result<Bytecode> {
                     kernel_index.clone(),
                     oracle_set.clone(),
                     constraint_bodies.clone(),
+                    ast.const_table.clone(),
                 );
                 gen.emit_block(&s.body)?;
                 kernels.push(KernelBytecode {
@@ -182,7 +185,13 @@ fn generate_bytecode(ast: &TypedAst, _lib_mode: bool) -> Result<Bytecode> {
     }
 
     // ── Pass 2: compile fn/skill/memory/oracle into the main instruction stream ─
-    let mut gen = Codegen::new(type_env, kernel_index, oracle_set, constraint_bodies);
+    let mut gen = Codegen::new(
+        type_env,
+        kernel_index,
+        oracle_set,
+        constraint_bodies,
+        ast.const_table.clone(),
+    );
 
     // Emit lore pre-ops before any fn body.
     for op in pre_ops {
@@ -220,6 +229,15 @@ fn generate_bytecode(ast: &TypedAst, _lib_mode: bool) -> Result<Bytecode> {
 
 // ── Internal code-generation state ───────────────────────────────────────────
 
+/// Context for the innermost enclosing loop — used by break/continue.
+#[derive(Debug, Clone)]
+struct LoopCtx {
+    #[allow(dead_code)]
+    start_idx: usize,
+    break_patch_idxs: Vec<usize>,
+    continue_patch_idxs: Vec<usize>,
+}
+
 struct Codegen {
     ops: Vec<OpCode>,
     type_env: HashMap<String, Vec<String>>,
@@ -230,6 +248,10 @@ struct Codegen {
     /// When `true`, `verify(...)` emits `ConstraintVerify` (non-retriable)
     /// instead of `VerifyStep` (retriable via kernel retry loop).
     in_constraint: bool,
+    /// Stack of enclosing loop contexts — for break/continue code generation.
+    loop_stack: Vec<LoopCtx>,
+    /// Const name → compile-time evaluated value.
+    const_table: HashMap<String, ConstValue>,
 }
 
 impl Codegen {
@@ -238,6 +260,7 @@ impl Codegen {
         kernel_index: HashMap<String, u16>,
         oracle_set: HashSet<String>,
         constraint_bodies: HashMap<String, Block>,
+        const_table: HashMap<String, ConstValue>,
     ) -> Self {
         Self {
             ops: Vec::new(),
@@ -246,6 +269,8 @@ impl Codegen {
             oracle_set,
             constraint_bodies,
             in_constraint: false,
+            loop_stack: Vec::new(),
+            const_table,
         }
     }
 
@@ -260,22 +285,27 @@ impl Codegen {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn emit_stmt(&mut self, stmt: &Stmt) -> Result<()> {
         match stmt {
-            // ── let x [: T] = expr ───────────────────────────────────────────
-            Stmt::Let(name, ty, expr) => {
-                // Special case: `let x: SomeSemanticType = infer(arg)`
-                // — inject the resolved labels into InferClassify.
-                if let (Some(TypeExpr::Named(type_name)), Expr::Call(callee, args)) = (ty, expr) {
-                    if callee == "infer" {
-                        let labels = self.type_env.get(type_name).cloned().unwrap_or_default();
-                        self.emit_expr(arg(args, 0, "infer")?)?;
-                        self.emit(OpCode::InferClassify(labels));
-                        self.emit(OpCode::StoreLocal(name.clone()));
-                        return Ok(());
+            // ── let [mut] x [: T] = expr ─────────────────────────────────────
+            Stmt::Let(name, ty, expr_opt, _is_mut) => {
+                // Only emit if there's an initializer expression
+                if let Some(expr) = expr_opt {
+                    // Special case: `let x: SomeSemanticType = infer(arg)`
+                    // — inject the resolved labels into InferClassify.
+                    if let (Some(TypeExpr::Named(type_name)), Expr::Call(callee, args)) = (ty, expr)
+                    {
+                        if callee == "infer" {
+                            let labels = self.type_env.get(type_name).cloned().unwrap_or_default();
+                            self.emit_expr(arg(args, 0, "infer")?)?;
+                            self.emit(OpCode::InferClassify(labels));
+                            self.emit(OpCode::StoreLocal(name.clone()));
+                            return Ok(());
+                        }
                     }
+                    self.emit_expr(expr)?;
                 }
-                self.emit_expr(expr)?;
                 self.emit(OpCode::StoreLocal(name.clone()));
             }
 
@@ -332,26 +362,313 @@ impl Codegen {
                 self.in_constraint = false;
                 self.emit(OpCode::EndConstraint);
             }
+
+            // ── Phase 7: Control flow ────────────────────────────────────
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                // Emit condition
+                self.emit_expr(condition)?;
+
+                // Placeholder for jump address - will be patched later
+                let jump_false_idx = self.ops.len();
+                self.emit(OpCode::JumpIfFalse(0)); // placeholder
+
+                // Emit then branch
+                self.emit_block(then_branch)?;
+
+                // Placeholder for end jump
+                let jump_end_idx = self.ops.len();
+                self.emit(OpCode::Jump(0)); // placeholder
+
+                // Patch JumpIfFalse to jump to else branch (or end if no else)
+                let else_start_idx = self.ops.len();
+                if let OpCode::JumpIfFalse(ref mut addr) = self.ops[jump_false_idx] {
+                    *addr = else_start_idx;
+                }
+
+                // Emit else branch if present
+                if let Some(else_block) = else_branch {
+                    self.emit_block(else_block)?;
+                }
+
+                // Patch Jump to jump to end
+                let end_idx = self.ops.len();
+                if let OpCode::Jump(ref mut addr) = self.ops[jump_end_idx] {
+                    *addr = end_idx;
+                }
+            }
+
+            Stmt::Loop(body) => {
+                let loop_start_idx = self.ops.len();
+
+                // Push loop context for break/continue
+                self.loop_stack.push(LoopCtx {
+                    start_idx: loop_start_idx,
+                    break_patch_idxs: Vec::new(),
+                    continue_patch_idxs: Vec::new(),
+                });
+
+                self.emit_block(body)?;
+
+                // Jump back to start
+                self.emit(OpCode::Jump(loop_start_idx));
+
+                // Pop loop context and patch break/continue
+                let ctx = self.loop_stack.pop().unwrap();
+                let loop_end_idx = self.ops.len();
+
+                // Patch all break jumps to go to loop exit
+                for idx in ctx.break_patch_idxs {
+                    if let OpCode::Jump(ref mut addr) = self.ops[idx] {
+                        *addr = loop_end_idx;
+                    }
+                }
+
+                // Patch all continue jumps to go to loop start
+                for idx in ctx.continue_patch_idxs {
+                    if let OpCode::Jump(ref mut addr) = self.ops[idx] {
+                        *addr = loop_start_idx;
+                    }
+                }
+            }
+
+            Stmt::While { condition, body } => {
+                let condition_idx = self.ops.len();
+
+                // Push loop context
+                self.loop_stack.push(LoopCtx {
+                    start_idx: condition_idx,
+                    break_patch_idxs: Vec::new(),
+                    continue_patch_idxs: Vec::new(),
+                });
+
+                self.emit_expr(condition)?;
+                let jump_false_idx = self.ops.len();
+                self.emit(OpCode::JumpIfFalse(0)); // placeholder
+
+                self.emit_block(body)?;
+
+                // Jump back to condition
+                self.emit(OpCode::Jump(condition_idx));
+
+                // Patch JumpIfFalse and break jumps
+                let end_idx = self.ops.len();
+                if let OpCode::JumpIfFalse(ref mut addr) = self.ops[jump_false_idx] {
+                    *addr = end_idx;
+                }
+
+                // Pop loop context and patch
+                let ctx = self.loop_stack.pop().unwrap();
+                for idx in ctx.break_patch_idxs {
+                    if let OpCode::Jump(ref mut addr) = self.ops[idx] {
+                        *addr = end_idx;
+                    }
+                }
+                for idx in ctx.continue_patch_idxs {
+                    if let OpCode::Jump(ref mut addr) = self.ops[idx] {
+                        *addr = condition_idx;
+                    }
+                }
+            }
+
+            Stmt::For {
+                item,
+                collection,
+                body,
+            } => {
+                // Generate unique local names for the iteration state
+                let vec_name = format!("__for_vec_{body:p}");
+                let len_name = format!("__for_len_{body:p}");
+                let i_name = format!("__for_i_{body:p}");
+
+                // Evaluate collection and store it
+                self.emit_expr(collection)?;
+                self.emit(OpCode::StoreLocal(vec_name.clone()));
+
+                // Get length and store it
+                self.emit(OpCode::LoadLocal(vec_name.clone()));
+                self.emit(OpCode::VecLen);
+                self.emit(OpCode::StoreLocal(len_name.clone()));
+
+                // Initialize counter to 0
+                self.emit(OpCode::PushInt(0));
+                self.emit(OpCode::StoreLocal(i_name.clone()));
+
+                // Condition start index
+                let cond_start_idx = self.ops.len();
+
+                // Push loop context
+                self.loop_stack.push(LoopCtx {
+                    start_idx: cond_start_idx,
+                    break_patch_idxs: Vec::new(),
+                    continue_patch_idxs: Vec::new(),
+                });
+
+                // Loop: check i < len
+                self.emit(OpCode::LoadLocal(i_name.clone()));
+                self.emit(OpCode::LoadLocal(len_name.clone()));
+                self.emit(OpCode::CmpLt);
+
+                let jump_exit_idx = self.ops.len();
+                self.emit(OpCode::JumpIfFalse(0)); // placeholder
+
+                // Get vec[i] and store as item
+                self.emit(OpCode::LoadLocal(vec_name.clone()));
+                self.emit(OpCode::LoadLocal(i_name.clone()));
+                self.emit(OpCode::VecGet);
+                self.emit(OpCode::StoreLocal(item.clone()));
+
+                // Execute body
+                self.emit_block(body)?;
+
+                // Increment index: i = i + 1
+                let increment_idx = self.ops.len();
+                self.emit(OpCode::LoadLocal(i_name.clone()));
+                self.emit(OpCode::PushInt(1));
+                self.emit(OpCode::Add);
+                self.emit(OpCode::StoreLocal(i_name.clone()));
+
+                // Jump back to condition
+                self.emit(OpCode::Jump(cond_start_idx));
+
+                // Patch JumpIfFalse to exit
+                let exit_idx = self.ops.len();
+                if let OpCode::JumpIfFalse(ref mut addr) = self.ops[jump_exit_idx] {
+                    *addr = exit_idx;
+                }
+
+                // Patch break jumps to exit
+                let ctx = self.loop_stack.pop().unwrap();
+                for idx in ctx.break_patch_idxs {
+                    if let OpCode::Jump(ref mut addr) = self.ops[idx] {
+                        *addr = exit_idx;
+                    }
+                }
+                // Patch continue jumps to increment step
+                for idx in ctx.continue_patch_idxs {
+                    if let OpCode::Jump(ref mut addr) = self.ops[idx] {
+                        *addr = increment_idx;
+                    }
+                }
+            }
+
+            Stmt::Assign(name, expr) => {
+                self.emit_expr(expr)?;
+                self.emit(OpCode::StoreLocal(name.clone()));
+            }
         }
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn emit_expr(&mut self, expr: &Expr) -> Result<()> {
         match expr {
             Expr::StringLit(s) => self.emit(OpCode::PushStr(s.clone())),
             Expr::IntLit(n) => self.emit(OpCode::PushInt(*n)),
             Expr::FloatLit(f) => self.emit(OpCode::PushFloat(*f)),
-            Expr::Ident(name) => self.emit(OpCode::LoadLocal(name.clone())),
+            Expr::BoolLit(b) => self.emit(OpCode::PushBool(*b)),
+            Expr::Ident(name) => {
+                // Check if this is a compile-time constant
+                if let Some(value) = self.const_table.get(name) {
+                    match value {
+                        ConstValue::Int(n) => self.emit(OpCode::PushInt((*n).cast_unsigned())),
+                        ConstValue::Float(f) => self.emit(OpCode::PushFloat(*f)),
+                        ConstValue::Bool(b) => self.emit(OpCode::PushBool(*b)),
+                        ConstValue::Str(s) => self.emit(OpCode::PushStr(s.clone())),
+                    }
+                } else {
+                    self.emit(OpCode::LoadLocal(name.clone()));
+                }
+            }
             Expr::Call(name, args) => self.emit_call(name, args)?,
             Expr::BinOp(lhs, op, rhs) => {
                 self.emit_expr(lhs)?;
                 self.emit_expr(rhs)?;
                 let cmp = match op {
                     ast::BinOp::NotEq => OpCode::CmpNotEq,
+                    ast::BinOp::Eq => OpCode::CmpEq,
                     ast::BinOp::Gt => OpCode::CmpGt,
                     ast::BinOp::Lt => OpCode::CmpLt,
+                    ast::BinOp::Add => OpCode::Add,
+                    ast::BinOp::Sub => OpCode::Sub,
+                    ast::BinOp::Mul => OpCode::Mul,
+                    ast::BinOp::Div => OpCode::Div,
+                    ast::BinOp::Mod => OpCode::Mod,
+                    ast::BinOp::And => OpCode::And,
+                    ast::BinOp::Or => OpCode::Or,
                 };
                 self.emit(cmp);
+            }
+            Expr::Break => {
+                if let Some(_ctx) = self.loop_stack.last() {
+                    let idx = self.ops.len();
+                    self.emit(OpCode::Jump(0));
+                    self.loop_stack
+                        .last_mut()
+                        .unwrap()
+                        .break_patch_idxs
+                        .push(idx);
+                } else {
+                    return Err(anyhow!("`break` outside of loop"));
+                }
+            }
+            Expr::Continue => {
+                if let Some(_ctx) = self.loop_stack.last() {
+                    let idx = self.ops.len();
+                    self.emit(OpCode::Jump(0));
+                    self.loop_stack
+                        .last_mut()
+                        .unwrap()
+                        .continue_patch_idxs
+                        .push(idx);
+                } else {
+                    return Err(anyhow!("`continue` outside of loop"));
+                }
+            }
+            Expr::Tuple(exprs) => {
+                for e in exprs {
+                    self.emit_expr(e)?;
+                }
+                #[allow(clippy::cast_possible_truncation)]
+                self.emit(OpCode::TuplePack(exprs.len() as u8));
+            }
+            Expr::VecLit(exprs) => {
+                for e in exprs {
+                    self.emit_expr(e)?;
+                }
+                #[allow(clippy::cast_possible_truncation)]
+                self.emit(OpCode::VecNew(exprs.len() as u8));
+            }
+            Expr::Index(base, idx) => {
+                self.emit_expr(base)?;
+                self.emit_expr(idx)?;
+                self.emit(OpCode::VecGet);
+            }
+            Expr::FieldAccess(base, field) => {
+                self.emit_expr(base)?;
+                self.emit(OpCode::FieldAccess(field.clone()));
+            }
+            Expr::StructConstruct { name, fields } => {
+                for (_, e) in fields {
+                    self.emit_expr(e)?;
+                }
+                let field_names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+                self.emit(OpCode::StructConstruct {
+                    name: name.clone(),
+                    field_names,
+                });
+            }
+            Expr::EnumVariant { variant, payload } => {
+                if let Some(e) = payload {
+                    self.emit_expr(e)?;
+                }
+                self.emit(OpCode::EnumVariant {
+                    variant: variant.clone(),
+                    payload: payload.is_some(),
+                });
             }
         }
         Ok(())
@@ -400,6 +717,12 @@ impl Codegen {
                 self.emit_expr(arg(args, 0, "ctx_share")?)?;
                 self.emit(OpCode::CtxShare);
             }
+            "ctx_resize" => {
+                self.emit_expr(arg(args, 0, "ctx_resize")?)?;
+                let size = extract_int_arg(args, 1, "ctx_resize")?;
+                #[allow(clippy::cast_possible_truncation)]
+                self.emit(OpCode::CtxResize(0, size as u32));
+            }
             "println" => {
                 self.emit_expr(arg(args, 0, "println")?)?;
                 self.emit(OpCode::Println);
@@ -410,8 +733,9 @@ impl Codegen {
             }
             "reason" => match arg(args, 0, "reason")? {
                 Expr::StringLit(s) => self.emit(OpCode::Reason(s.clone())),
-                other => {
-                    self.emit_expr(other)?;
+                _other => {
+                    // Non-literal reason: emit as annotation only, no stack effect.
+                    // We don't evaluate the expression since Reason is a no-op in the VM.
                     self.emit(OpCode::Reason(String::new()));
                 }
             },
@@ -445,10 +769,8 @@ impl Codegen {
                 self.emit(OpCode::PersistDelete);
             }
             _ => {
-                // Unknown call — emit args only (no call frame).
-                for a in args {
-                    self.emit_expr(a)?;
-                }
+                // This should have been caught by semantic analysis.
+                return Err(anyhow!("undefined function: `{name}`"));
             }
         }
         Ok(())

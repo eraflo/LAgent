@@ -1,0 +1,48 @@
+// Struct and enum examples
+
+const ORIGIN: f32 = 0.0;
+
+struct Point {
+    x: f32,
+    y: f32,
+}
+
+struct User {
+    name: str,
+    age: u32,
+}
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+enum Result {
+    Ok,
+    Err,
+}
+
+fn main() {
+    println("Struct and enum demo");
+    
+    // Use constant
+    println(ORIGIN);
+
+    // Color enum — in a real implementation we'd pattern-match
+    let mut color_val = 0;
+    color_val = color_val + 1;
+    println(color_val);
+
+    // Arithmetic demo
+    let a = 10 + 20;
+    let b = a * 3;
+    let c = b - 15;
+    let d = c / 5;
+    let e = 17 % 5;
+    println(a);
+    println(b);
+    println(c);
+    println(d);
+    println(e);
+}

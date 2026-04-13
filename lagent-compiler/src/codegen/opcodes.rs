@@ -38,6 +38,10 @@ pub enum OpCode {
     Return,
     /// Halt the top-level program.
     Halt,
+    /// Unconditional jump to the given instruction index.
+    Jump(usize),
+    /// Jump to the given instruction index if TOS is Int(0) (false).
+    JumpIfFalse(usize),
 
     // ── Call frames ───────────────────────────────────────────────────────────
     /// Call a kernel by index into [`Bytecode::kernels`].
@@ -91,6 +95,55 @@ pub enum OpCode {
     CmpGt,
     /// `Int(1)` if lhs < rhs, else `Int(0)`.
     CmpLt,
+
+    // ── Phase 7: Arithmetic operators ────────────────────────────────────────
+    /// Pop rhs and lhs, push lhs + rhs.
+    Add,
+    /// Pop rhs and lhs, push lhs - rhs.
+    Sub,
+    /// Pop rhs and lhs, push lhs * rhs.
+    Mul,
+    /// Pop rhs and lhs, push lhs / rhs.
+    Div,
+    /// Pop rhs and lhs, push lhs % rhs.
+    Mod,
+
+    // ── Phase 7: Logical operators ───────────────────────────────────────────
+    /// Pop rhs and lhs, push lhs && rhs (Int(1) if both non-zero, else Int(0)).
+    And,
+    /// Pop rhs and lhs, push lhs || rhs (Int(1) if either non-zero, else Int(0)).
+    Or,
+
+    // ── Phase 7: Boolean and control flow ────────────────────────────────────
+    /// Push a boolean value (Int(1) for true, Int(0) for false) onto the stack.
+    PushBool(bool),
+    /// Pop N values from the stack and pack them into a single tuple value.
+    TuplePack(u8),
+
+    /// ── Phase 8: Vector operations ──────────────────────────────────────────
+    /// Create a Vec from the top N values on the stack.
+    VecNew(u8),
+    /// Pop index (TOS) and vec ref (next), push element at index.
+    VecGet,
+    /// Pop index (TOS), vec ref (next), and value (next); store value at index.
+    VecSet,
+    /// Pop vec ref (TOS), push its length as Int.
+    VecLen,
+    /// Pop value (TOS) and vec ref (next); push value onto vec.
+    VecPush,
+
+    // ── Phase 7: Tuple/struct field access ───────────────────────────────
+    /// Pop struct/tuple (TOS), push the named field's value.
+    FieldAccess(String),
+
+    // ── Phase 8: Struct/Enum construction ───────────────────────────────
+    /// Pop N field values (in declaration order) and pack into a struct value.
+    StructConstruct {
+        name: String,
+        field_names: Vec<String>,
+    },
+    /// Push an enum variant value.
+    EnumVariant { variant: String, payload: bool },
 
     // ── Phase 4: agent vocabulary ─────────────────────────────────────────────
     /// Store the agent soul identity string in the VM for introspection.

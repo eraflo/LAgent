@@ -1,0 +1,107 @@
+// Phase 7 comprehensive demo — all new features
+
+// ── Compile-time constants (top-level only) ────────────────────────────────
+const MAX_RETRIES: u32 = 3;
+const PI_APPROX: f32 = 3.14;
+const IS_READY: bool = 1 > 0;
+const GREETING: str = "Phase 7 complete!";
+const DOUBLE_PI: f32 = 6.28;
+const FIFTEEN: u32 = 15;
+
+// ── Struct definitions ──────────────────────────────────────────────────────
+struct Vector2 {
+    x: f32,
+    y: f32,
+}
+
+struct Config {
+    name: str,
+    version: u32,
+    debug: bool,
+}
+
+// ── Enum definitions ────────────────────────────────────────────────────────
+enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+enum Direction {
+    North,
+    South,
+    East,
+    West,
+}
+
+// ── Main ────────────────────────────────────────────────────────────────────
+fn main() {
+    println(GREETING);
+
+    // ── if/else with comparisons ─────────────────────────────────────────
+    let level = 5;
+    if level > 0 {
+        if level < 10 {
+            println("level is moderate");
+        } else {
+            println("level is high");
+        }
+    } else {
+        println("level is non-positive");
+    }
+
+    if level == 5 {
+        println("level is five");
+    }
+
+    // ── Mutable variables ───────────────────────────────────────────────
+    let mut total = 0;
+    total = total + 10;
+    total = total + 20;
+    total = total + 30;
+    println(total);
+
+    // ── Arithmetic operators ────────────────────────────────────────────
+    let sum = 100 + 50;
+    let diff = 100 - 50;
+    let prod = 10 * 5;
+    let quot = 100 / 4;
+    let rem = 17 % 5;
+    println(sum);
+    println(diff);
+    println(prod);
+    println(quot);
+    println(rem);
+
+    // ── While loop ──────────────────────────────────────────────────────
+    let mut countdown = 3;
+    while countdown > 0 {
+        println(countdown);
+        countdown = countdown - 1;
+    }
+    println("liftoff");
+
+    // ── Loop with break ─────────────────────────────────────────────────
+    let mut i = 0;
+    loop {
+        i = i + 1;
+        if i > 3 {
+            break;
+        }
+        println(i);
+    }
+
+    // ── Arithmetic inline ───────────────────────────────────────────────
+    let mag_sq = 3.0 * 3.0 + 4.0 * 4.0;
+    println(mag_sq);
+
+    // ── Const expressions (evaluated at compile-time) ─────────────────────
+    println(DOUBLE_PI);
+    println(FIFTEEN);
+
+    // ── Boolean constants ───────────────────────────────────────────────
+    if IS_READY {
+        println("ready to proceed");
+    }
+}

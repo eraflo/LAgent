@@ -19,8 +19,27 @@ pub enum Value {
     Int(u64),
     /// 64-bit float.
     Float(f64),
+    /// Boolean value (stored as Int(1) for true, Int(0) for false).
+    Bool(bool),
     /// Handle to an allocated context segment in the [`TokenHeap`].
     CtxHandle(u32),
+    /// ── Phase 7: Tuple ──────────────────────────────────────────────────
+    /// Tuple value — ordered collection of heterogeneous values.
+    Tuple(Vec<Value>),
+    /// ── Phase 8: Struct/Enum ────────────────────────────────────────────
+    /// Struct value — named fields.
+    Struct {
+        name: String,
+        fields: std::collections::HashMap<String, Value>,
+    },
+    /// Enum variant — named variant with optional payload.
+    EnumVariant {
+        variant: String,
+        payload: Option<Box<Value>>,
+    },
+    /// ── Phase 8: Vector ─────────────────────────────────────────────────
+    /// Dynamic array of values (stored on heap via Rc for shared references).
+    Vec(std::rc::Rc<std::cell::RefCell<Vec<Value>>>),
 }
 
 impl std::fmt::Display for Value {
@@ -29,7 +48,46 @@ impl std::fmt::Display for Value {
             Value::Str(s) => write!(f, "{s}"),
             Value::Int(n) => write!(f, "{n}"),
             Value::Float(v) => write!(f, "{v}"),
+            Value::Bool(b) => write!(f, "{b}"),
             Value::CtxHandle(h) => write!(f, "<ctx#{h}>"),
+            Value::EnumVariant { variant, payload } => {
+                write!(f, "{variant}")?;
+                if let Some(p) = payload {
+                    write!(f, "({p})")?;
+                }
+                Ok(())
+            }
+            Value::Struct { name, fields } => {
+                write!(f, "{name} {{")?;
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{k}: {v}")?;
+                }
+                write!(f, "}}")
+            }
+            Value::Tuple(items) => {
+                write!(f, "(")?;
+                for (i, val) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{val}")?;
+                }
+                write!(f, ")")
+            }
+            Value::Vec(v) => {
+                let inner = v.borrow();
+                write!(f, "[")?;
+                for (i, val) in inner.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{val}")?;
+                }
+                write!(f, "]")
+            }
         }
     }
 }
@@ -85,12 +143,15 @@ impl Vm {
 
     #[allow(clippy::too_many_lines)]
     fn run(&mut self, bc: &Bytecode, ops: &[OpCode], frame: &mut Frame) -> Result<()> {
-        for op in ops {
+        let mut pc = 0; // program counter
+        while pc < ops.len() {
+            let op = &ops[pc];
             match op {
                 // ── Literals ──────────────────────────────────────────────
                 OpCode::PushStr(s) => frame.push(Value::Str(s.clone())),
                 OpCode::PushInt(n) => frame.push(Value::Int(*n)),
                 OpCode::PushFloat(f) => frame.push(Value::Float(*f)),
+                OpCode::PushBool(b) => frame.push(Value::Bool(*b)),
 
                 // ── Locals ────────────────────────────────────────────────
                 OpCode::StoreLocal(name) => {
@@ -190,7 +251,23 @@ impl Vm {
                 }
 
                 // ── Control flow ──────────────────────────────────────────
-                OpCode::Return | OpCode::Halt => break,
+                OpCode::Return | OpCode::Halt => return Ok(()),
+                OpCode::Jump(target) => {
+                    pc = *target;
+                    continue;
+                }
+                OpCode::JumpIfFalse(target) => {
+                    let val = frame.pop()?;
+                    let is_false = match val {
+                        Value::Int(0) | Value::Bool(false) => true,
+                        Value::Str(ref s) if s.is_empty() => true,
+                        _ => false,
+                    };
+                    if is_false {
+                        pc = *target;
+                        continue;
+                    }
+                }
 
                 // ── Call frames ───────────────────────────────────────────
                 OpCode::CallKernel(idx) => {
@@ -306,6 +383,60 @@ impl Vm {
                     frame.push(Value::Int(u64::from(result)));
                 }
 
+                // ── Phase 7: Arithmetic operators ─────────────────────────
+                OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Div | OpCode::Mod => {
+                    let rhs = frame.pop()?;
+                    let lhs = frame.pop()?;
+                    let result = match (op, &lhs, &rhs) {
+                        (OpCode::Add, Value::Int(a), Value::Int(b)) => Value::Int(a + b),
+                        (OpCode::Sub, Value::Int(a), Value::Int(b)) => Value::Int(a - b),
+                        (OpCode::Mul, Value::Int(a), Value::Int(b)) => Value::Int(a * b),
+                        (OpCode::Div, Value::Int(a), Value::Int(b)) => {
+                            if *b == 0 {
+                                return Err(anyhow!("division by zero"));
+                            }
+                            Value::Int(a / b)
+                        }
+                        (OpCode::Mod, Value::Int(a), Value::Int(b)) => {
+                            if *b == 0 {
+                                return Err(anyhow!("modulo by zero"));
+                            }
+                            Value::Int(a % b)
+                        }
+                        (OpCode::Add, Value::Float(a), Value::Float(b)) => Value::Float(a + b),
+                        (OpCode::Sub, Value::Float(a), Value::Float(b)) => Value::Float(a - b),
+                        (OpCode::Mul, Value::Float(a), Value::Float(b)) => Value::Float(a * b),
+                        (OpCode::Div, Value::Float(a), Value::Float(b)) => Value::Float(a / b),
+                        (OpCode::Mod, Value::Float(a), Value::Float(b)) => Value::Float(a % b),
+                        _ => {
+                            return Err(anyhow!(
+                                "invalid operands for arithmetic: {lhs:?} {op:?} {rhs:?}"
+                            ));
+                        }
+                    };
+                    frame.push(result);
+                }
+
+                // ── Phase 7: Logical operators ────────────────────────────
+                OpCode::And | OpCode::Or => {
+                    let rhs = frame.pop()?;
+                    let lhs = frame.pop()?;
+                    let result = match (op, &lhs, &rhs) {
+                        (OpCode::And, a, b) => {
+                            let a_bool = value_to_bool(a);
+                            let b_bool = value_to_bool(b);
+                            Value::Bool(a_bool && b_bool)
+                        }
+                        (OpCode::Or, a, b) => {
+                            let a_bool = value_to_bool(a);
+                            let b_bool = value_to_bool(b);
+                            Value::Bool(a_bool || b_bool)
+                        }
+                        _ => unreachable!(),
+                    };
+                    frame.push(result);
+                }
+
                 // ── Interruptible blocks ──────────────────────────────────
                 OpCode::BeginInterruptible => {
                     frame.checkpoint = Some(Box::new(FrameState {
@@ -350,20 +481,149 @@ impl Vm {
                         let v = frame.pop()?;
                         arg_strs.push(v.to_string());
                     }
-                    arg_strs.reverse(); // restore original argument order
+                    arg_strs.reverse();
                     let result = self.backend.oracle(name, &arg_strs)?;
                     frame.push(Value::Str(result));
                 }
 
+                // ── Lore ──────────────────────────────────────────────────
                 OpCode::StoreLore(name, text) => {
                     self.lore.insert(name.clone(), text.clone());
                 }
-
                 OpCode::LoadLore(name) => {
-                    let text = self.lore.get(name).cloned().unwrap_or_default();
-                    frame.push(Value::Str(text));
+                    let val = self.lore.get(name).cloned().unwrap_or_default();
+                    frame.push(Value::Str(val));
+                }
+
+                // ── Phase 7: Tuple ──────────────────────────────────────
+                OpCode::TuplePack(n) => {
+                    let mut items = Vec::with_capacity(*n as usize);
+                    for _ in 0..*n {
+                        items.push(frame.pop()?);
+                    }
+                    items.reverse();
+                    frame.push(Value::Tuple(items));
+                }
+                OpCode::FieldAccess(field) => {
+                    let val = frame.pop()?;
+                    match val {
+                        Value::Tuple(items) => {
+                            if let Ok(idx) = field.parse::<usize>() {
+                                let item = items.get(idx).cloned().ok_or_else(|| {
+                                    anyhow!("tuple index {idx} out of bounds (len={})", items.len())
+                                })?;
+                                frame.push(item);
+                            } else {
+                                return Err(anyhow!("cannot access field `{field}` on tuple"));
+                            }
+                        }
+                        Value::Struct { name, fields } => {
+                            let field_val = fields
+                                .get(field)
+                                .cloned()
+                                .ok_or_else(|| anyhow!("struct `{name}` has no field `{field}`"))?;
+                            frame.push(field_val);
+                        }
+                        _ => {
+                            return Err(anyhow!(
+                                "cannot access field `{field}` on non-struct/tuple value"
+                            ));
+                        }
+                    }
+                }
+
+                // ── Phase 8: Struct/Enum construction ────────────────────
+                OpCode::StructConstruct { name, field_names } => {
+                    let mut fields = std::collections::HashMap::new();
+                    for field_name in field_names.iter().rev() {
+                        fields.insert(field_name.clone(), frame.pop()?);
+                    }
+                    frame.push(Value::Struct {
+                        name: name.clone(),
+                        fields,
+                    });
+                }
+                OpCode::EnumVariant { variant, payload } => {
+                    let val = if *payload {
+                        Some(Box::new(frame.pop()?))
+                    } else {
+                        None
+                    };
+                    frame.push(Value::EnumVariant {
+                        variant: variant.clone(),
+                        payload: val,
+                    });
+                }
+
+                // ── Phase 8: Vector operations ────────────────────────────
+                OpCode::VecNew(n) => {
+                    let mut vec = Vec::with_capacity(*n as usize);
+                    for _ in 0..*n {
+                        vec.push(frame.pop()?);
+                    }
+                    vec.reverse(); // was pushed in reverse order
+                    frame.push(Value::Vec(std::rc::Rc::new(std::cell::RefCell::new(vec))));
+                }
+                OpCode::VecGet => {
+                    let idx_val = frame.pop()?;
+                    let vec_val = frame.pop()?;
+                    if let Value::Vec(rc) = vec_val {
+                        #[allow(clippy::cast_possible_truncation)]
+                        let idx = match idx_val {
+                            Value::Int(i) => i as usize,
+                            _ => return Err(anyhow!("vector index must be an integer")),
+                        };
+                        let vec = rc.borrow();
+                        let val = vec.get(idx).cloned().ok_or_else(|| {
+                            anyhow!("vector index {idx} out of bounds (len={})", vec.len())
+                        })?;
+                        frame.push(val);
+                    } else {
+                        return Err(anyhow!("cannot index non-vector value"));
+                    }
+                }
+                OpCode::VecSet => {
+                    let val = frame.pop()?;
+                    let idx_val = frame.pop()?;
+                    let vec_val = frame.pop()?;
+                    if let Value::Vec(rc) = vec_val {
+                        #[allow(clippy::cast_possible_truncation)]
+                        let idx = match idx_val {
+                            Value::Int(i) => i as usize,
+                            _ => return Err(anyhow!("vector index must be an integer")),
+                        };
+                        let mut vec = rc.borrow_mut();
+                        if idx >= vec.len() {
+                            return Err(anyhow!(
+                                "vector index {idx} out of bounds (len={})",
+                                vec.len()
+                            ));
+                        }
+                        vec[idx] = val;
+                    } else {
+                        return Err(anyhow!("cannot index non-vector value"));
+                    }
+                }
+                OpCode::VecLen => {
+                    let vec_val = frame.pop()?;
+                    if let Value::Vec(rc) = vec_val {
+                        let len = rc.borrow().len();
+                        frame.push(Value::Int(len as u64));
+                    } else {
+                        return Err(anyhow!("cannot get length of non-vector value"));
+                    }
+                }
+                OpCode::VecPush => {
+                    let val = frame.pop()?;
+                    let vec_val = frame.pop()?;
+                    if let Value::Vec(rc) = vec_val {
+                        rc.borrow_mut().push(val);
+                    } else {
+                        return Err(anyhow!("cannot push to non-vector value"));
+                    }
                 }
             }
+            pc += 1;
         }
         Ok(())
     }
@@ -371,11 +631,22 @@ impl Vm {
 
 // ── Value comparison helpers ──────────────────────────────────────────────────
 
+/// Convert a [`Value`] to a boolean.
+fn value_to_bool(val: &Value) -> bool {
+    match val {
+        Value::Bool(b) => *b,
+        Value::Int(n) => *n != 0,
+        Value::Str(s) => !s.is_empty(),
+        _ => false,
+    }
+}
+
 fn values_eq(lhs: &Value, rhs: &Value) -> bool {
     match (lhs, rhs) {
         (Value::Str(a), Value::Str(b)) => a == b,
         (Value::Int(a), Value::Int(b)) => a == b,
         (Value::Float(a), Value::Float(b)) => a == b,
+        (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::CtxHandle(a), Value::CtxHandle(b)) => a == b,
         _ => false,
     }

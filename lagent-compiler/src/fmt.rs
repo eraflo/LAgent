@@ -6,9 +6,9 @@
 //! Goal: `fmt(parse(src))` is a valid, round-trippable source file.
 
 use crate::parser::ast::{
-    BinOp, BranchCase, BranchStmt, ConstraintDef, Expr, FnDef, Item, KernelDef, LoreDecl,
-    MemoryDecl, OracleDecl, Param, PrimType, SkillDef, SoulDef, SpellDef, Stmt, TypeAlias,
-    TypeExpr, UseDecl,
+    BinOp, BranchCase, BranchStmt, ConstDef, ConstraintDef, EnumDef, Expr, FnDef, Item, KernelDef,
+    LoreDecl, MemoryDecl, OracleDecl, Param, PrimType, SkillDef, SoulDef, SpellDef, Stmt,
+    StructDef, TypeAlias, TypeExpr, UseDecl,
 };
 use std::fmt;
 
@@ -49,6 +49,9 @@ impl fmt::Display for Pp<'_, Item> {
             Item::ConstraintDef(x) => write!(f, "{}", Pp(x, self.1)),
             Item::LoreDecl(x) => write!(f, "{}", Pp(x, self.1)),
             Item::UseDecl(x) => write!(f, "{}", Pp(x, self.1)),
+            Item::StructDef(x) => write!(f, "{}", Pp(x, self.1)),
+            Item::EnumDef(x) => write!(f, "{}", Pp(x, self.1)),
+            Item::ConstDef(x) => write!(f, "{}", Pp(x, self.1)),
         }
     }
 }
@@ -227,11 +230,18 @@ fn fmt_block(stmts: &[Stmt], indent: usize) -> String {
 impl fmt::Display for Pp<'_, Stmt> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
-            Stmt::Let(name, ty, expr) => {
+            Stmt::Let(name, ty, expr_opt, is_mut) => {
+                let mut_str = if *is_mut { "mut " } else { "" };
                 if let Some(t) = ty {
-                    write!(f, "let {name}: {} = {};", Pp(t, 0), Pp(expr, 0))
+                    if let Some(expr) = expr_opt {
+                        write!(f, "let {mut_str}{name}: {} = {};", Pp(t, 0), Pp(expr, 0))
+                    } else {
+                        write!(f, "let {mut_str}{name}: {};", Pp(t, 0))
+                    }
+                } else if let Some(expr) = expr_opt {
+                    write!(f, "let {mut_str}{name} = {};", Pp(expr, 0))
                 } else {
-                    write!(f, "let {name} = {};", Pp(expr, 0))
+                    write!(f, "let {mut_str}{name};")
                 }
             }
             Stmt::Return(expr) => write!(f, "return {};", Pp(expr, 0)),
@@ -241,6 +251,43 @@ impl fmt::Display for Pp<'_, Stmt> {
             Stmt::Branch(b) => write!(f, "{}", Pp(b, self.1)),
             Stmt::Interruptible(block) => {
                 write!(f, "interruptible {}", fmt_block(block, self.1))
+            }
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                write!(
+                    f,
+                    "if {} {}",
+                    Pp(condition, 0),
+                    fmt_block(then_branch, self.1)
+                )?;
+                if let Some(else_block) = else_branch {
+                    write!(f, " else {}", fmt_block(else_block, self.1))?;
+                }
+                Ok(())
+            }
+            Stmt::Loop(body) => {
+                write!(f, "loop {}", fmt_block(body, self.1))
+            }
+            Stmt::While { condition, body } => {
+                write!(f, "while {} {}", Pp(condition, 0), fmt_block(body, self.1))
+            }
+            Stmt::For {
+                item,
+                collection,
+                body,
+            } => {
+                write!(
+                    f,
+                    "for {item} in {} {}",
+                    Pp(collection, 0),
+                    fmt_block(body, self.1)
+                )
+            }
+            Stmt::Assign(name, expr) => {
+                write!(f, "{name} = {};", Pp(expr, 0))
             }
         }
     }
@@ -283,6 +330,7 @@ impl fmt::Display for Pp<'_, Expr> {
             Expr::StringLit(s) => write!(f, "\"{s}\""),
             Expr::IntLit(n) => write!(f, "{n}"),
             Expr::FloatLit(v) => write!(f, "{v}"),
+            Expr::BoolLit(b) => write!(f, "{b}"),
             Expr::Ident(name) => write!(f, "{name}"),
             Expr::Call(name, args) => {
                 write!(f, "{name}(")?;
@@ -303,6 +351,51 @@ impl fmt::Display for Pp<'_, Expr> {
                     Pp(rhs.as_ref(), 0)
                 )
             }
+            Expr::Break => write!(f, "break"),
+            Expr::Continue => write!(f, "continue"),
+            Expr::Tuple(exprs) => {
+                write!(f, "(")?;
+                for (i, e) in exprs.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", Pp(e, 0))?;
+                }
+                write!(f, ")")
+            }
+            Expr::VecLit(exprs) => {
+                write!(f, "[")?;
+                for (i, e) in exprs.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", Pp(e, 0))?;
+                }
+                write!(f, "]")
+            }
+            Expr::Index(base, idx) => {
+                write!(f, "{}[{}]", Pp(base.as_ref(), 0), Pp(idx.as_ref(), 0))
+            }
+            Expr::FieldAccess(base, field) => {
+                write!(f, "{}.{}", Pp(base.as_ref(), 0), field)
+            }
+            Expr::StructConstruct { name, fields } => {
+                write!(f, "{name} {{ ")?;
+                for (i, (k, e)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{k}: {}", Pp(e, 0))?;
+                }
+                write!(f, " }}")
+            }
+            Expr::EnumVariant { variant, payload } => {
+                write!(f, "{variant}")?;
+                if let Some(e) = payload {
+                    write!(f, "({})", Pp(e.as_ref(), 0))?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -311,8 +404,16 @@ impl fmt::Display for Pp<'_, BinOp> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             BinOp::NotEq => write!(f, "!="),
+            BinOp::Eq => write!(f, "=="),
             BinOp::Gt => write!(f, ">"),
             BinOp::Lt => write!(f, "<"),
+            BinOp::And => write!(f, "&&"),
+            BinOp::Or => write!(f, "||"),
+            BinOp::Add => write!(f, "+"),
+            BinOp::Sub => write!(f, "-"),
+            BinOp::Mul => write!(f, "*"),
+            BinOp::Div => write!(f, "/"),
+            BinOp::Mod => write!(f, "%"),
         }
     }
 }
@@ -334,6 +435,7 @@ impl fmt::Display for Pp<'_, TypeExpr> {
                 }
                 write!(f, ")")
             }
+            TypeExpr::Vec(inner) => write!(f, "Vec<{}>", Pp(inner.as_ref(), 0)),
         }
     }
 }
@@ -345,6 +447,65 @@ impl fmt::Display for Pp<'_, PrimType> {
             PrimType::Bool => write!(f, "bool"),
             PrimType::U32 => write!(f, "u32"),
             PrimType::F32 => write!(f, "f32"),
+        }
+    }
+}
+
+// ── Phase 7: Composite types ──────────────────────────────────────────────
+
+impl fmt::Display for Pp<'_, StructDef> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let i = ind(self.1);
+        if self.0.is_pub {
+            writeln!(f, "{i}pub struct {} {{", self.0.name)?;
+        } else {
+            writeln!(f, "{i}struct {} {{", self.0.name)?;
+        }
+        for field in &self.0.fields {
+            writeln!(f, "{}{}{}: {},", i, INDENT, field.name, Pp(&field.ty, 0))?;
+        }
+        write!(f, "{i}}}")
+    }
+}
+
+impl fmt::Display for Pp<'_, EnumDef> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let i = ind(self.1);
+        if self.0.is_pub {
+            writeln!(f, "{i}pub enum {} {{", self.0.name)?;
+        } else {
+            writeln!(f, "{i}enum {} {{", self.0.name)?;
+        }
+        for variant in &self.0.variants {
+            write!(f, "{}{}{}", i, INDENT, variant.name)?;
+            if let Some(payload) = &variant.payload {
+                write!(f, "({})", Pp(payload, 0))?;
+            }
+            writeln!(f, ",")?;
+        }
+        write!(f, "{i}}}")
+    }
+}
+
+impl fmt::Display for Pp<'_, ConstDef> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let i = ind(self.1);
+        if self.0.is_pub {
+            write!(
+                f,
+                "{i}pub const {}: {} = {};",
+                self.0.name,
+                Pp(&self.0.ty, 0),
+                Pp(&self.0.value, 0)
+            )
+        } else {
+            write!(
+                f,
+                "{i}const {}: {} = {};",
+                self.0.name,
+                Pp(&self.0.ty, 0),
+                Pp(&self.0.value, 0)
+            )
         }
     }
 }

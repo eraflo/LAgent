@@ -1,0 +1,41 @@
+// Collections: Vec, for loops, indexing
+
+const SIZE: u32 = 5;
+
+fn main() {
+    // Vec literal
+    let nums = [10, 20, 30, 40, 50];
+    println(nums);
+
+    // Indexing
+    let first = nums[0];
+    println(first);
+
+    let last = nums[4];
+    println(last);
+
+    // For loop over vec
+    for n in nums {
+        println(n);
+    }
+
+    // Vec with strings
+    let names = ["alice", "bob", "charlie"];
+    for name in names {
+        println(name);
+    }
+
+    // Nested: indexing with expression
+    let idx = 1 + 1;
+    let mid = nums[idx];
+    println(mid);
+
+    // Constant in vec context
+    println(SIZE);
+
+    // Arithmetic in vec
+    let values = [1 + 2, 3 * 4, 10 - 5];
+    for v in values {
+        println(v);
+    }
+}

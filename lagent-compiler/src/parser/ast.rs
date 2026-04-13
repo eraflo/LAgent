@@ -24,6 +24,13 @@ pub enum Item {
     LoreDecl(LoreDecl),
     /// Module import.
     UseDecl(UseDecl),
+    // ── Phase 7: Composite types & constants ─────────────────────────────
+    /// `struct Name { fields }` — named aggregate type.
+    StructDef(StructDef),
+    /// `enum Name { variants }` — tagged union type.
+    EnumDef(EnumDef),
+    /// `const NAME: Type = value;` — compile-time constant.
+    ConstDef(ConstDef),
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +125,45 @@ pub struct UseDecl {
     pub path: String,
 }
 
+// ── Phase 7: Composite types & constants ──────────────────────────────────────
+
+/// `struct Name { field: Type, ... }` — aggregate type.
+#[derive(Debug, Clone)]
+pub struct StructDef {
+    pub name: String,
+    pub fields: Vec<StructField>,
+    pub is_pub: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructField {
+    pub name: String,
+    pub ty: TypeExpr,
+}
+
+/// `enum Name { VariantA, VariantB, ... }` — tagged union.
+#[derive(Debug, Clone)]
+pub struct EnumDef {
+    pub name: String,
+    pub variants: Vec<EnumVariant>,
+    pub is_pub: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumVariant {
+    pub name: String,
+    pub payload: Option<TypeExpr>,
+}
+
+/// `const NAME: Type = value;` — compile-time constant.
+#[derive(Debug, Clone)]
+pub struct ConstDef {
+    pub name: String,
+    pub ty: TypeExpr,
+    pub value: Expr,
+    pub is_pub: bool,
+}
+
 // ── Shared types ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -131,6 +177,8 @@ pub enum TypeExpr {
     Named(String),
     Semantic(Vec<String>),
     Primitive(PrimType),
+    /// `Vec<T>` — dynamic array type.
+    Vec(Box<TypeExpr>),
 }
 
 #[derive(Debug, Clone)]
@@ -145,7 +193,7 @@ pub type Block = Vec<Stmt>;
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    Let(String, Option<TypeExpr>, Expr),
+    Let(String, Option<TypeExpr>, Option<Expr>, bool), // name, type, init_expr, is_mut
     Return(Expr),
     Expr(Expr),
     Branch(BranchStmt),
@@ -155,6 +203,28 @@ pub enum Stmt {
     Instruction(String),
     /// `apply ConstraintName;` — inline a named constraint body at this call site.
     Apply(String),
+    // ── Phase 7: Control flow ────────────────────────────────────────────
+    /// `if condition { ... } else { ... }`
+    If {
+        condition: Expr,
+        then_branch: Block,
+        else_branch: Option<Block>,
+    },
+    /// `loop { ... }`
+    Loop(Block),
+    /// `while condition { ... }`
+    While {
+        condition: Expr,
+        body: Block,
+    },
+    /// `for item in collection { ... }`
+    For {
+        item: String,
+        collection: Expr,
+        body: Block,
+    },
+    /// `x = expr;` — reassignment of a mutable variable.
+    Assign(String, Expr),
 }
 
 #[derive(Debug, Clone)]
@@ -178,12 +248,48 @@ pub enum Expr {
     StringLit(String),
     IntLit(u64),
     FloatLit(f64),
+    BoolLit(bool),
     BinOp(Box<Expr>, BinOp, Box<Expr>),
+    // ── Phase 7: Control flow expressions ────────────────────────────────
+    /// `break` — exit the innermost loop
+    Break,
+    /// `continue` — skip to the next iteration of the innermost loop
+    Continue,
+    /// Tuple literal — `(a, b, c)`
+    Tuple(Vec<Expr>),
+    /// ── Phase 8: Collections ────────────────────────────────────────────
+    /// Vector literal — `[a, b, c]`
+    VecLit(Vec<Expr>),
+    /// Index access — `expr[index]`
+    Index(Box<Expr>, Box<Expr>),
+    /// Field/tuple access — `expr.field` or `tuple.0`
+    FieldAccess(Box<Expr>, String),
+    /// Struct construction — `Name { field: expr, ... }`
+    StructConstruct {
+        name: String,
+        fields: Vec<(String, Expr)>,
+    },
+    /// Enum variant construction — `Variant(expr)` or `Variant`
+    EnumVariant {
+        variant: String,
+        payload: Option<Box<Expr>>,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub enum BinOp {
+    // Comparison operators
     NotEq,
+    Eq,
     Gt,
     Lt,
+    // Logical operators
+    And,
+    Or,
+    // Arithmetic operators
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
 }

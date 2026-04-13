@@ -162,32 +162,38 @@ Target: `constraint` inlining at call sites, `pub` visibility, `lagent.toml`, pe
 
 ---
 
-## Phase 7 — Fondamentaux du Langage
+## Phase 7 — Fondamentaux du Langage (partielle)
 Target: essential control structures, composite types, collections, error handling, and mutability.
 
 ### Control Flow
-- [ ] `loop { ... }` — infinite loop with `break` and `continue`
-- [ ] `while condition { ... }` — conditional loop
-- [ ] `for item in collection { ... }` — iteration over collections
-- [ ] `if condition { ... } else { ... }` — deterministic boolean branching (distinct from probabilistic `branch`)
+- [x] `loop { ... }` — infinite loop with `break` and `continue`
+- [x] `while condition { ... }` — conditional loop
+- [x] `for item in vec { ... }` — iteration over `Vec<T>` collections (index-based, works with `break`/`continue`)
+- [x] `if condition { ... } else { ... }` — deterministic boolean branching (distinct from probabilistic `branch`)
 
 ### Composite Types
-- [ ] `struct Name { field: Type, ... }` — named field aggregates
-- [ ] `enum Name { VariantA, VariantB, ... }` — tagged unions with variant payloads
-- [ ] Tuples — `(T, U, V)` anonymous product types, tuple indexing `tuple.0`
+- [x] `struct Name { field: Type, ... }` — named field aggregates (declaration + construction `Name { field: expr }` + field access `s.field`)
+- [x] `enum Name { Variant, Variant(T) }` — tagged unions with optional variant payloads (declaration + construction `Variant(expr)` / `Variant`)
+- [x] Tuples — `(T, U, V)` anonymous product types, tuple indexing `tuple.0`
 
 ### Collections
-- [ ] `Vec<T>` — dynamic arrays with literals `[a, b, c]`
+- [x] `Vec<T>` — dynamic arrays with literals `[a, b, c]`, indexing `arr[i]`
 - [ ] `Map<K, V>` — key-value dictionaries with literals `{key: val}`
 - [ ] `Set<T>` — unordered unique-element collections
-- [ ] Index expressions — `collection[index]`, length/size methods
 
 ### Mutability & Constants
-- [ ] `let mut x = ...` — explicit mutable binding (immutable `let` by default)
-- [ ] Compile-time mutability enforcement — reject writes to immutable locals
-- [ ] `const NAME: Type = value;` — **évaluée à la compilation** (calculée une fois par le compilateur, jamais dans le bytecode runtime)
-- [ ] `const` is **never visible par le LLM** — pure code-level value (calculs, comparaisons, conditions)
-- [ ] Distinction sémantique : `const` → programmation, `lore` → connaissances injectées dans le contexte système du LLM
+- [x] `let mut x = ...` — explicit mutable binding (immutable `let` by default)
+- [x] Reassignment `x = expr;` — only allowed on `mut` bindings (compile-time error otherwise)
+- [x] `const NAME: Type = value;` — **évaluée à la compilation** (littéraux + opérations binaires, références entre constantes)
+- [x] `const` is **never visible par le LLM** — pure code-level value (calculs, comparaisons, conditions)
+- [x] Distinction sémantique : `const` → programmation, `lore` → connaissances injectées dans le contexte système du LLM
+
+### Type Safety
+- [x] Rejet compile-time : arithmetic sur strings (`"a" + 1`)
+- [x] Rejet compile-time : logique sur non-booleans (`1 && 5`)
+- [x] Rejet compile-time : appel de fonction undefined
+- [x] Rejet compile-time : `break`/`continue` hors boucle
+- [x] Runtime : division par zéro, index vector out of bounds, field access invalide
 
 ### Persistence Unification
 - [ ] `persistent memory Name: T = expr;` — nouvelle syntaxe pour persistance **inter-run** (sauvegardé dans le fichier via `--persist`)
@@ -209,10 +215,12 @@ Target: essential control structures, composite types, collections, error handli
 - [ ] `throw expr` — explicit error raising
 
 ### Extended Operators
-- [ ] Arithmetic: `+`, `-`, `*`, `/`, `%`
-- [ ] Logical: `&&`, `||`, `!` (extend beyond current `!=`, `>`, `<`)
-- [ ] Equality: `==` (symmetric with existing `!=`)
-- [ ] Arithmetic opcodes in VM: `Add`, `Sub`, `Mul`, `Div`, `Mod`
+- [x] Arithmetic: `+`, `-`, `*`, `/`, `%` (Int + Float supportés, types mixtes rejetés au runtime)
+- [x] Logical: `&&`, `||` (opérandes booléennes requises)
+- [x] Equality: `==` (symmetric with existing `!=`)
+- [x] Arithmetic opcodes in VM: `Add`, `Sub`, `Mul`, `Div`, `Mod`
+- [x] Vector opcodes in VM: `VecNew`, `VecGet`, `VecSet`, `VecLen`, `VecPush`
+- [x] Tuple/Struct opcodes in VM: `TuplePack`, `FieldAccess`, `StructConstruct`, `EnumVariant`
 
 ---
 

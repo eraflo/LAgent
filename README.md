@@ -258,7 +258,7 @@ docs/                    # SPEC.md, ARCHITECTURE.md, ROADMAP.md
 
 ## Development Status
 
-**Pre-alpha — Phase 6 complete.** The full compiler pipeline, VM, and toolchain are functional.
+**Pre-alpha — Phase 7 en cours.** Le compilateur complet (pipeline + VM + toolchain) est fonctionnel. Les fondamentaux du langage (contrôle de flux, struct/enum, Vec, const, mut, type safety) sont implémentés. Persistence unification, bytecode cleanup et error handling restent à faire.
 
 | Phase | Description | Status |
 |-------|-------------|:------:|
@@ -268,7 +268,7 @@ docs/                    # SPEC.md, ARCHITECTURE.md, ROADMAP.md
 | 4 | Agent vocabulary, module system, remote backend | ✅ |
 | 5 | Sémantique stricte — `fn`, `skill`, `spell`, `kernel` | ⏳ |
 | 6 | Constraint enforcement, `pub`, persistent memory, `.lalb`, `fmt` | ⏳ |
-| 7 | Fondamentaux — loops, if/else, struct/enum, collections, `const` | ⏳ |
+| 7 | Fondamentaux — loops, if/else, struct/enum, Vec, `const`, `mut`, type safety | 🔄 |
 | 8 | Robustesse — `Dist<T>`, `AgentError`, fallbacks, token tracking | ⏳ |
 | 9 | Parallélisme — `parallel`/`race`, merge strategies, `-O` flags | ⏳ |
 | 10 | Méta-programmation — macros, attributes, lambdas, generics | ⏳ |

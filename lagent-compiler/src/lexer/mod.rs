@@ -29,6 +29,24 @@ pub enum Token {
     #[token("interruptible")]
     Interruptible,
 
+    // ── Phase 7: Deterministic control flow ──────────────────────────────
+    #[token("if")]
+    If,
+    #[token("else")]
+    Else,
+    #[token("loop")]
+    Loop,
+    #[token("while")]
+    While,
+    #[token("for")]
+    For,
+    #[token("in")]
+    In,
+    #[token("break")]
+    Break,
+    #[token("continue")]
+    Continue,
+
     // ── Declaration keywords ───────────────────────────────────────────────
     #[token("type")]
     Type,
@@ -38,6 +56,18 @@ pub enum Token {
     Pub,
     #[token("use")]
     Use,
+
+    // ── Phase 7: Mutability & constants ──────────────────────────────────
+    #[token("mut")]
+    Mut,
+    #[token("const")]
+    Const,
+
+    // ── Phase 7: Composite types ─────────────────────────────────────────
+    #[token("struct")]
+    Struct,
+    #[token("enum")]
+    Enum,
 
     // ── Agent vocabulary ───────────────────────────────────────────────────
     /// Defines the persistent identity / personality of an agent.
@@ -169,6 +199,22 @@ pub enum Token {
     Lt,
     #[token("!=")]
     NotEq,
+    #[token("==")]
+    Eq,
+    #[token("&&")]
+    And,
+    #[token("||")]
+    Or,
+    #[token("+")]
+    Plus,
+    #[token("-")]
+    Minus,
+    #[token("*")]
+    Star,
+    #[token("/")]
+    Slash,
+    #[token("%")]
+    Percent,
 
     // ── Literals ───────────────────────────────────────────────────────────
     /// A double-quoted string literal. The stored value includes the surrounding quotes.

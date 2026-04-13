@@ -9,9 +9,9 @@ pub mod ast;
 use crate::lexer::Token;
 use anyhow::{anyhow, Result};
 use ast::{
-    BinOp, Block, BranchCase, BranchStmt, ConstraintDef, Expr, FnDef, Item, KernelDef, LoreDecl,
-    MemoryDecl, OracleDecl, Param, PrimType, SkillDef, SoulDef, SpellDef, Stmt, TypeAlias,
-    TypeExpr, UseDecl,
+    BinOp, Block, BranchCase, BranchStmt, ConstDef, ConstraintDef, EnumDef, EnumVariant, Expr,
+    FnDef, Item, KernelDef, LoreDecl, MemoryDecl, OracleDecl, Param, PrimType, SkillDef, SoulDef,
+    SpellDef, Stmt, StructDef, StructField, TypeAlias, TypeExpr, UseDecl,
 };
 use chumsky::prelude::*;
 
@@ -68,11 +68,27 @@ fn type_expr() -> impl Parser<Token, TypeExpr, Error = Simple<Token>> {
         )
         .map(TypeExpr::Semantic);
 
-    prim.or(semantic).or(ident().map(TypeExpr::Named))
+    // Vec<T> — recursive type
+    let vec_ty = recursive(|te| {
+        just(Token::Ident("Vec".to_string()))
+            .ignore_then(te.delimited_by(just(Token::Lt), just(Token::Gt)))
+            .map(|inner| TypeExpr::Vec(Box::new(inner)))
+    });
+
+    prim.or(semantic)
+        .or(vec_ty)
+        .or(ident().map(TypeExpr::Named))
+}
+
+/// Postfix operator applied to an expression.
+enum PostfixOp {
+    Index(Expr),
+    Field(String),
 }
 
 // ── Expressions ───────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn expr() -> impl Parser<Token, Expr, Error = Simple<Token>> {
     recursive(|expr| {
         let str_lit = str_inner().map(Expr::StringLit);
@@ -93,7 +109,37 @@ fn expr() -> impl Parser<Token, Expr, Error = Simple<Token>> {
             }
         });
 
+        let bool_lit = just(Token::Ident("true".to_string()))
+            .to(Expr::BoolLit(true))
+            .or(just(Token::Ident("false".to_string())).to(Expr::BoolLit(false)));
+
+        let break_expr = just(Token::Break).to(Expr::Break);
+        let continue_expr = just(Token::Continue).to(Expr::Continue);
+
+        // Tuple: (expr1, expr2, ...)
+        let tuple_expr = expr
+            .clone()
+            .separated_by(just(Token::Comma))
+            .delimited_by(just(Token::LParen), just(Token::RParen))
+            .map(|exprs| {
+                if exprs.len() == 1 {
+                    // Single parenthesized expression, not a tuple
+                    exprs.into_iter().next().unwrap()
+                } else {
+                    Expr::Tuple(exprs)
+                }
+            });
+
+        // Vector literal: [a, b, c]
+        let vec_lit = expr
+            .clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .delimited_by(just(Token::LBracket), just(Token::RBracket))
+            .map(Expr::VecLit);
+
         let args = expr
+            .clone()
             .separated_by(just(Token::Comma))
             .delimited_by(just(Token::LParen), just(Token::RParen));
 
@@ -144,33 +190,134 @@ fn expr() -> impl Parser<Token, Expr, Error = Simple<Token>> {
 
         let ident_expr = ident().map(Expr::Ident);
 
-        // Box the atom so that the `Clone` required for the rhs branch works.
-        let atom = builtin_call
+        // Struct construction: Name { field: expr, ... }
+        let struct_construct = ident()
+            .then(
+                ident()
+                    .then_ignore(just(Token::Colon))
+                    .then(expr.clone())
+                    .separated_by(just(Token::Comma))
+                    .allow_trailing()
+                    .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+            )
+            .map(|(name, fields)| Expr::StructConstruct { name, fields });
+
+        // Enum variant: Variant(expr) — requires parentheses to distinguish from plain Ident
+        let enum_construct = ident()
+            .then(
+                expr.clone()
+                    .map(Box::new)
+                    .delimited_by(just(Token::LParen), just(Token::RParen)),
+            )
+            .map(|(variant, payload)| Expr::EnumVariant {
+                variant,
+                payload: Some(payload),
+            });
+
+        // Base atoms (without postfix)
+        let atom_base = builtin_call
             .or(user_call)
             .or(str_lit)
             .or(float_lit)
             .or(int_lit)
+            .or(bool_lit.clone())
+            .or(break_expr)
+            .or(continue_expr)
+            .or(tuple_expr)
+            .or(vec_lit.clone())
+            .or(struct_construct)
+            .or(enum_construct)
             .or(ident_expr)
             .boxed();
 
-        // Optional binary comparison: lhs (!=|>|<) rhs
-        let op = just(Token::NotEq)
-            .to(BinOp::NotEq)
-            .or(just(Token::Gt).to(BinOp::Gt))
-            .or(just(Token::Lt).to(BinOp::Lt));
+        // Postfix chaining: expr[index] and expr.field
+        let index_op = just(Token::LBracket)
+            .ignore_then(expr.clone())
+            .then_ignore(just(Token::RBracket))
+            .map(PostfixOp::Index);
 
-        atom.clone().then(op.then(atom).or_not()).map(|(lhs, rhs)| {
-            if let Some((op, rhs)) = rhs {
-                Expr::BinOp(Box::new(lhs), op, Box::new(rhs))
-            } else {
-                lhs
-            }
-        })
+        let field_op = just(Token::Dot)
+            .ignore_then(
+                filter(|t| matches!(t, Token::IntLit(_)))
+                    .map(|t| {
+                        if let Token::IntLit(n) = t {
+                            n.to_string()
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .or(ident()),
+            )
+            .map(PostfixOp::Field);
+
+        let postfix = atom_base
+            .then(index_op.or(field_op).repeated())
+            .foldl(|base, op| match op {
+                PostfixOp::Index(idx) => Expr::Index(Box::new(base), Box::new(idx)),
+                PostfixOp::Field(name) => Expr::FieldAccess(Box::new(base), name),
+            });
+
+        // Box the final expression with postfix for use in binary ops
+        let atom = postfix.boxed();
+
+        // Binary operators with proper precedence using Pratt parsing
+        // Lowest to highest: || < && < ==,!= < <,> < +,- < *,/,%
+
+        let op_or = just(Token::Or).to(BinOp::Or);
+        let op_and = just(Token::And).to(BinOp::And);
+        let op_cmp_eq = just(Token::Eq)
+            .to(BinOp::Eq)
+            .or(just(Token::NotEq).to(BinOp::NotEq));
+        let op_cmp_ord = just(Token::Gt)
+            .to(BinOp::Gt)
+            .or(just(Token::Lt).to(BinOp::Lt));
+        let op_plus = just(Token::Plus)
+            .to(BinOp::Add)
+            .or(just(Token::Minus).to(BinOp::Sub));
+        #[allow(clippy::redundant_clone)]
+        let op_mul = just(Token::Star)
+            .to(BinOp::Mul)
+            .or(just(Token::Slash).to(BinOp::Div))
+            .or(just(Token::Percent).to(BinOp::Mod));
+
+        // Level 6: atoms
+        let level6 = atom.clone();
+        // Level 5: *, /, %
+        let level5 = level6
+            .clone()
+            .then(op_mul.then(level6.clone()).repeated())
+            .foldl(|lhs, (op, rhs)| Expr::BinOp(Box::new(lhs), op, Box::new(rhs)));
+        // Level 4: +, -
+        let level4 = level5
+            .clone()
+            .then(op_plus.then(level5.clone()).repeated())
+            .foldl(|lhs, (op, rhs)| Expr::BinOp(Box::new(lhs), op, Box::new(rhs)));
+        // Level 3: <, >
+        let level3 = level4
+            .clone()
+            .then(op_cmp_ord.then(level4.clone()).repeated())
+            .foldl(|lhs, (op, rhs)| Expr::BinOp(Box::new(lhs), op, Box::new(rhs)));
+        // Level 2: ==, !=
+        let level2 = level3
+            .clone()
+            .then(op_cmp_eq.then(level3.clone()).repeated())
+            .foldl(|lhs, (op, rhs)| Expr::BinOp(Box::new(lhs), op, Box::new(rhs)));
+        // Level 1: &&
+        let level1 = level2
+            .clone()
+            .then(op_and.then(level2.clone()).repeated())
+            .foldl(|lhs, (op, rhs)| Expr::BinOp(Box::new(lhs), op, Box::new(rhs)));
+        // Level 0: || (highest level, lowest precedence)
+        level1
+            .clone()
+            .then(op_or.then(level1).repeated())
+            .foldl(|lhs, (op, rhs)| Expr::BinOp(Box::new(lhs), op, Box::new(rhs)))
     })
 }
 
 // ── Statements ────────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn stmt() -> impl Parser<Token, Stmt, Error = Simple<Token>> {
     // Forward-declare so that block() can be used inside branch_stmt().
     recursive(|stmt| {
@@ -178,13 +325,15 @@ fn stmt() -> impl Parser<Token, Stmt, Error = Simple<Token>> {
             .repeated()
             .delimited_by(just(Token::LBrace), just(Token::RBrace));
 
+        // let [mut] name [: type] = expr;
         let let_stmt = just(Token::Let)
-            .ignore_then(ident())
+            .ignore_then(just(Token::Mut).or_not())
+            .then(ident())
             .then(just(Token::Colon).ignore_then(type_expr()).or_not())
             .then_ignore(just(Token::Assign))
             .then(expr())
             .then_ignore(just(Token::Semi))
-            .map(|((name, ty), val)| Stmt::Let(name, ty, val));
+            .map(|(((mut_opt, name), ty), val)| Stmt::Let(name, ty, Some(val), mut_opt.is_some()));
 
         let return_stmt = just(Token::Return)
             .ignore_then(expr())
@@ -269,8 +418,54 @@ fn stmt() -> impl Parser<Token, Stmt, Error = Simple<Token>> {
             .then_ignore(just(Token::Semi))
             .map(Stmt::Apply);
 
+        // Phase 7: if condition { ... } else { ... }
+        let if_stmt = just(Token::If)
+            .ignore_then(expr())
+            .then(block_inner.clone())
+            .then(just(Token::Else).ignore_then(block_inner.clone()).or_not())
+            .map(|((condition, then_branch), else_branch)| Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            });
+
+        // Phase 7: loop { ... }
+        let loop_stmt = just(Token::Loop)
+            .ignore_then(block_inner.clone())
+            .map(Stmt::Loop);
+
+        // Phase 7: while condition { ... }
+        let while_stmt = just(Token::While)
+            .ignore_then(expr())
+            .then(block_inner.clone())
+            .map(|(condition, body)| Stmt::While { condition, body });
+
+        // Phase 7: for item in collection { ... }
+        let for_stmt = just(Token::For)
+            .ignore_then(ident())
+            .then_ignore(just(Token::In))
+            .then(expr())
+            .then(block_inner.clone())
+            .map(|((item, collection), body)| Stmt::For {
+                item,
+                collection,
+                body,
+            });
+
+        // Phase 7: x = expr; — mutable reassignment
+        let assign_stmt = ident()
+            .then_ignore(just(Token::Assign))
+            .then(expr())
+            .then_ignore(just(Token::Semi))
+            .map(|(name, expr)| Stmt::Assign(name, expr));
+
         instruction_stmt
             .or(apply_stmt)
+            .or(if_stmt)
+            .or(loop_stmt)
+            .or(while_stmt)
+            .or(for_stmt)
+            .or(assign_stmt)
             .or(let_stmt)
             .or(return_stmt)
             .or(branch_stmt)
@@ -474,6 +669,78 @@ fn use_decl() -> impl Parser<Token, Item, Error = Simple<Token>> {
         .map(|path| Item::UseDecl(UseDecl { path }))
 }
 
+// ── Phase 7: Composite types & constants ──────────────────────────────────────
+
+fn struct_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Struct))
+        .then(ident())
+        .then(
+            ident()
+                .then_ignore(just(Token::Colon))
+                .then(type_expr())
+                .map(|(name, ty)| StructField { name, ty })
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+        )
+        .map(|((is_pub_opt, name), fields)| {
+            Item::StructDef(StructDef {
+                name,
+                fields,
+                is_pub: is_pub_opt.is_some(),
+            })
+        })
+}
+
+fn enum_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Enum))
+        .then(ident())
+        .then(
+            ident()
+                .then(
+                    just(Token::LParen)
+                        .ignore_then(type_expr())
+                        .then_ignore(just(Token::RParen))
+                        .or_not(),
+                )
+                .map(|(name, payload)| EnumVariant { name, payload })
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+        )
+        .map(|((is_pub_opt, name), variants)| {
+            Item::EnumDef(EnumDef {
+                name,
+                variants,
+                is_pub: is_pub_opt.is_some(),
+            })
+        })
+}
+
+fn const_def() -> impl Parser<Token, Item, Error = Simple<Token>> {
+    just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Const))
+        .then(ident())
+        .then_ignore(just(Token::Colon))
+        .then(type_expr())
+        .then_ignore(just(Token::Assign))
+        .then(expr())
+        .then_ignore(just(Token::Semi))
+        .map(|(((is_pub_opt, name), ty), value)| {
+            Item::ConstDef(ConstDef {
+                name,
+                ty,
+                value,
+                is_pub: is_pub_opt.is_some(),
+            })
+        })
+}
+
 fn program() -> impl Parser<Token, Vec<Item>, Error = Simple<Token>> {
     type_alias()
         .or(kernel_def())
@@ -485,6 +752,9 @@ fn program() -> impl Parser<Token, Vec<Item>, Error = Simple<Token>> {
         .or(constraint_def())
         .or(lore_decl())
         .or(use_decl())
+        .or(struct_def())
+        .or(enum_def())
+        .or(const_def())
         .or(fn_def())
         .repeated()
         .then_ignore(end())
@@ -790,6 +1060,201 @@ soul {
             assert_eq!(c.name, "PositiveOnly");
         } else {
             panic!("expected ConstraintDef");
+        }
+    }
+
+    // ── Phase 7 parser tests ──────────────────────────────────────────────
+
+    #[test]
+    fn parses_if_else() {
+        let src = r#"
+fn main() {
+    if 1 {
+        println("yes");
+    } else {
+        println("no");
+    }
+}
+"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        if let Item::FnDef(f) = &items[0] {
+            assert_eq!(f.body.len(), 1);
+            assert!(matches!(&f.body[0], Stmt::If { .. }));
+        } else {
+            panic!("expected FnDef");
+        }
+    }
+
+    #[test]
+    fn parses_loop() {
+        let src = r#"
+fn main() {
+    loop {
+        println("looping");
+    }
+}
+"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        if let Item::FnDef(f) = &items[0] {
+            assert!(matches!(&f.body[0], Stmt::Loop(_)));
+        } else {
+            panic!("expected FnDef");
+        }
+    }
+
+    #[test]
+    fn parses_while() {
+        let src = r"
+fn main() {
+    while x != 0 {
+        println(x);
+    }
+}
+";
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        if let Item::FnDef(f) = &items[0] {
+            assert!(matches!(&f.body[0], Stmt::While { .. }));
+        } else {
+            panic!("expected FnDef");
+        }
+    }
+
+    #[test]
+    fn parses_let_mut() {
+        let src = r"
+fn main() {
+    let mut x = 42;
+    x = 100;
+}
+";
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        if let Item::FnDef(f) = &items[0] {
+            assert_eq!(f.body.len(), 2);
+            // First: let mut
+            if let Stmt::Let(_, _, _, is_mut) = &f.body[0] {
+                assert!(*is_mut);
+            } else {
+                panic!("expected Let");
+            }
+            // Second: assignment
+            assert!(matches!(&f.body[1], Stmt::Assign(_, _)));
+        } else {
+            panic!("expected FnDef");
+        }
+    }
+
+    #[test]
+    fn parses_const() {
+        let src = r"
+const MAX: u32 = 100;
+fn main() {}
+";
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 2);
+        if let Item::ConstDef(c) = &items[0] {
+            assert_eq!(c.name, "MAX");
+        } else {
+            panic!("expected ConstDef");
+        }
+    }
+
+    #[test]
+    fn parses_struct_def() {
+        let src = r"
+struct Point {
+    x: f32,
+    y: f32,
+}
+fn main() {}
+";
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        assert_eq!(items.len(), 2);
+        if let Item::StructDef(s) = &items[0] {
+            assert_eq!(s.name, "Point");
+            assert_eq!(s.fields.len(), 2);
+        } else {
+            panic!("expected StructDef");
+        }
+    }
+
+    #[test]
+    fn parses_enum_def() {
+        let src = r"
+enum Result {
+    Ok,
+    Err,
+}
+fn main() {}
+";
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        if let Item::EnumDef(e) = &items[0] {
+            assert_eq!(e.name, "Result");
+            assert_eq!(e.variants.len(), 2);
+        } else {
+            panic!("expected EnumDef");
+        }
+    }
+
+    #[test]
+    fn parses_arithmetic_operators() {
+        let src = r"
+fn main() {
+    let a = 1 + 2 * 3;
+    let b = 10 - 5;
+    let c = 20 / 4;
+    let d = 7 % 3;
+}
+";
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        if let Item::FnDef(f) = &items[0] {
+            assert_eq!(f.body.len(), 4);
+        } else {
+            panic!("expected FnDef");
+        }
+    }
+
+    #[test]
+    fn parses_logical_operators() {
+        let src = r#"
+fn main() {
+    if x > 0 && x < 10 {
+        println("in range");
+    }
+    if x == 0 || x == 100 {
+        println("boundary");
+    }
+}
+"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        if let Item::FnDef(f) = &items[0] {
+            assert_eq!(f.body.len(), 2);
+        } else {
+            panic!("expected FnDef");
+        }
+    }
+
+    #[test]
+    fn parses_tuple() {
+        let src = r#"
+fn main() {
+    let t = (1, "hello", 3.14);
+}
+"#;
+        let tokens = tokenize(src).unwrap();
+        let items = parse(tokens).unwrap();
+        if let Item::FnDef(f) = &items[0] {
+            assert_eq!(f.body.len(), 1);
+        } else {
+            panic!("expected FnDef");
         }
     }
 }

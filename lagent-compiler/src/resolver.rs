@@ -59,6 +59,10 @@ fn item_is_pub(item: &Item) -> bool {
         | Item::OracleDecl(OracleDecl { is_pub, .. })
         | Item::ConstraintDef(ConstraintDef { is_pub, .. })
         | Item::LoreDecl(LoreDecl { is_pub, .. }) => *is_pub,
+        // Phase 7: struct, enum, const also have visibility
+        Item::StructDef(s) => s.is_pub,
+        Item::EnumDef(e) => e.is_pub,
+        Item::ConstDef(c) => c.is_pub,
         // SoulDef, MemoryDecl, UseDecl are not re-exported from modules.
         Item::SoulDef(_) | Item::MemoryDecl(_) | Item::UseDecl(_) => false,
     }
