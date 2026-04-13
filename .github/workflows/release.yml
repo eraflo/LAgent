@@ -1,4 +1,4 @@
-name: Release
+name: Release-plz
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-# Permissions required by release-plz to push commits and open PRs.
+# Permissions required by release-plz to push commits, create releases, and manage PRs.
 permissions:
   contents: write
   pull-requests: write
@@ -24,20 +24,16 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # 1. Publish any new crate versions and create the GitHub Release + tag.
-      #    This is a no-op when no new tag exists yet.
+      # Publish crates and create GitHub Release (runs only when new tags are created).
       - name: Release — publish crates & create GitHub Release
         uses: release-plz/action@v0.5
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Set CARGO_REGISTRY_TOKEN in repository secrets when ready to
-          # publish on crates.io.
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      # 2. Open (or update) the "Release PR" that bumps versions + CHANGELOG.
-      #    Merging this PR on main will trigger the step above on the next push.
+      # Open (or update) the "Release PR" that bumps versions + CHANGELOG.
       - name: Release-PR — bump versions & update CHANGELOG
         uses: release-plz/action@v0.5
         with:
