@@ -110,14 +110,14 @@ impl PersistentStore for InMemoryPersistentStore {
 
 // ─── File path helper ─────────────────────────────────────────────────────────
 
-/// Walk up the directory tree from `start` looking for `lagent.toml`;
+/// Walk up the directory tree from `start` looking for `wispee.toml`;
 /// returns the directory containing it, or `None` if not found.
 /// (Used by CLI to locate the project root for a default store path.)
 #[must_use]
 pub fn find_project_root(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
-        if dir.join("lagent.toml").exists() {
+        if dir.join("wispee.toml").exists() {
             return Some(dir);
         }
         if !dir.pop() {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Lexer for the L-Agent language.
+//! Lexer for the Wispee language.
 //!
 //! Transforms raw `.la` source text into a flat sequence of [`Token`]s
 //! using the [`logos`] crate for zero-copy, high-performance tokenisation.
@@ -7,7 +7,7 @@
 use anyhow::Result;
 use logos::Logos;
 
-/// Every token in the L-Agent lexical grammar.
+/// Every token in the Wispee lexical grammar.
 #[derive(Logos, Debug, Clone, PartialEq)]
 #[logos(skip r"[ \t\n\r]+")] // whitespace
 #[logos(skip r"//[^\n]*")] // line comments
@@ -234,7 +234,7 @@ pub enum Token {
     Ident(String),
 }
 
-/// Tokenise L-Agent source code into a [`Vec`] of [`Token`]s.
+/// Tokenise Wispee source code into a [`Vec`] of [`Token`]s.
 ///
 /// # Errors
 ///

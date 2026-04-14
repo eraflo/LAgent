@@ -1,4 +1,4 @@
-# L-Agent
+# Wispee
 
 > A systems programming language for the LLM era.
 
@@ -6,17 +6,17 @@
 [![Rust](https://img.shields.io/badge/rust-1.78%2B-orange.svg)](https://www.rust-lang.org)
 [![Status](https://img.shields.io/badge/status-pre--alpha-yellow.svg)](docs/ROADMAP.md)
 
-**C gave you control over silicon. L-Agent gives you control over language models.**
+**C gave you control over silicon. Wispee gives you control over language models.**
 
-L-Agent (`lagent`, files: `.la`) is a **compiled, statically-typed language** that gives programmers explicit, low-level control over LLM inference primitives — context windows, probabilistic branching, reasoning kernels, and agent identity — in the same way C gives control over hardware registers and memory.
+Wispee (`wispee`, files: `.wpee`) is a **compiled, statically-typed language** that gives programmers explicit, low-level control over LLM inference primitives — context windows, probabilistic branching, reasoning kernels, and agent identity — in the same way C gives control over hardware registers and memory.
 
 ---
 
-## Why L-Agent?
+## Why Wispee?
 
 Today, programming agents means gluing Python scripts together, hoping prompt strings work, and having **zero guarantees** about what the LLM will do. There's no type system, no compiler, no resource control.
 
-L-Agent flips the model:
+Wispee flips the model:
 
 | What you get | What it replaces |
 |---|---|
@@ -76,7 +76,7 @@ fn main() {
 
 ## Core Concepts: The Four Primitives
 
-L-Agent distinguishes four levels of computation, each with **compile-time guarantees**:
+Wispee distinguishes four levels of computation, each with **compile-time guarantees**:
 
 | Primitive | LLM Access? | Context Access? | Auto-Retry? | Use Case |
 |-----------|:-----------:|:---------------:|:-----------:|----------|
@@ -138,8 +138,8 @@ kernel verify_diagnosis(symptoms: str) -> Diagnosis {
 | **Token heap management** | `ctx_alloc` / `ctx_free` / `ctx_compress` — explicit context budgeting |
 | **Persistent memory** | `memory` (intra-run) and `persistent memory` (inter-run via `--persist`) |
 | **Module system** | `use "module.la";` — inline import expansion, `pub` visibility |
-| **Library bundles** | `lagent build --lib` → `.lalb` precompiled bundle with export table |
-| **Auto-formatter** | `lagent fmt` — normalised 4-space-indented source |
+| **Library bundles** | `wispee build --lib` → `.walb` precompiled bundle with export table |
+| **Auto-formatter** | `wispee fmt` — normalised 4-space-indented source |
 
 ### Runtime
 
@@ -147,17 +147,17 @@ kernel verify_diagnosis(symptoms: str) -> Diagnosis {
 |---------|-------------|
 | **Multiple backends** | Simulated (default) or Anthropic API (`--backend anthropic`) |
 | **Deterministic mode** | `--deterministic` — temperature=0 for reproducible inference |
-| **Bytecode execution** | `.lbc` compiled output executed on a stack-based VM |
+| **Bytecode execution** | `.wbc` compiled output executed on a stack-based VM |
 
 ### Tooling
 
 | Feature | Description |
 |---------|-------------|
-| **`lagent build`** | Compile `.la` → `.lbc` bytecode |
-| **`lagent run`** | Compile + execute (simulated or remote backend) |
-| **`lagent check`** | Syntax & semantic analysis without codegen |
-| **`lagent fmt`** | Auto-format source files in place |
-| **`lagent.toml`** | Project manifest — entry point, models, optimization strategy |
+| **`wispee build`** | Compile `.wpee` → `.wbc` bytecode |
+| **`wispee run`** | Compile + execute (simulated or remote backend) |
+| **`wispee check`** | Syntax & semantic analysis without codegen |
+| **`wispee fmt`** | Auto-format source files in place |
+| **`wispee.toml`** | Project manifest — entry point, models, optimization strategy |
 
 ---
 
@@ -166,13 +166,13 @@ kernel verify_diagnosis(symptoms: str) -> Diagnosis {
 **Prerequisites:** Rust 1.78+ ([install via rustup](https://www.rust-lang.org/tools/install))
 
 ```bash
-cargo install --path lagent-cli
+cargo install --path wispee-cli
 ```
 
 For the Anthropic backend (remote API):
 
 ```bash
-cargo install --path lagent-cli --features backend-remote
+cargo install --path wispee-cli --features backend-remote
 ```
 
 ---
@@ -181,31 +181,31 @@ cargo install --path lagent-cli --features backend-remote
 
 ```bash
 # Compile
-lagent build src/main.la                         # → main.lbc
-lagent build --lib src/lib.la                    # → lib.lalb (library bundle)
+wispee build src/main.wpee                         # → main.wbc
+wispee build --lib src/lib.wpee                    # → lib.walb (library bundle)
 
 # Execute
-lagent run   src/main.la                         # compile + run (simulated)
-lagent run   --backend anthropic src/main.la     # compile + run (Anthropic API)
-lagent run   --deterministic src/main.la         # temperature=0
-lagent run   --persist store.json src/main.la    # attach cross-run persistence
+wispee run   src/main.wpee                         # compile + run (simulated)
+wispee run   --backend anthropic src/main.wpee     # compile + run (Anthropic API)
+wispee run   --deterministic src/main.wpee         # temperature=0
+wispee run   --persist store.json src/main.wpee    # attach cross-run persistence
 
 # Tooling
-lagent check src/main.la                         # syntax/semantic check only
-lagent fmt   src/main.la                         # auto-format in place
-lagent fmt   --check src/main.la                 # exit non-zero if file would change
+wispee check src/main.wpee                         # syntax/semantic check only
+wispee fmt   src/main.wpee                         # auto-format in place
+wispee fmt   --check src/main.wpee                 # exit non-zero if file would change
 ```
 
 ### Project Manifest
 
-When `lagent.toml` is present, `input` is optional:
+When `wispee.toml` is present, `input` is optional:
 
 ```bash
-lagent build          # uses project.entry from lagent.toml
-lagent build --lib    # uses lib.entry and lib.name from lagent.toml
+wispee build          # uses project.entry from wispee.toml
+wispee build --lib    # uses lib.entry and lib.name from wispee.toml
 ```
 
-Example `lagent.toml`:
+Example `wispee.toml`:
 
 ```toml
 [project]
@@ -224,7 +224,7 @@ context_limit = 8192
 ### Remote Backend
 
 ```bash
-LAGENT_API_KEY=sk-... lagent run --backend anthropic examples/agent_soul.la
+WISPEE_API_KEY=sk-... wispee run --backend anthropic examples/agent_soul.wpee
 ```
 
 ---
@@ -232,25 +232,25 @@ LAGENT_API_KEY=sk-... lagent run --backend anthropic examples/agent_soul.la
 ## Project Structure
 
 ```
-lagent-compiler/         # .la → bytecode compiler
+wispee-compiler/         # .wpee → bytecode compiler
 ├── src/
 │   ├── lexer/           # logos-based tokeniser
 │   ├── parser/          # chumsky parser → AST
 │   ├── codegen/         # 3-pass bytecode generator + opcodes
 │   ├── semantic/        # name resolution, type checking
 │   ├── resolver.rs      # module import expansion (pub visibility)
-│   ├── project.rs       # lagent.toml manifest
-│   └── fmt.rs           # AST pretty-printer (lagent fmt)
+│   ├── project.rs       # wispee.toml manifest
+│   └── fmt.rs           # AST pretty-printer (wispee fmt)
 
-lagent-vm/               # bytecode executor
+wispee-vm/               # bytecode executor
 ├── src/
 │   ├── vm.rs            # stack-based VM, opcode dispatch
 │   ├── backends/        # InferenceBackend trait, simulated, anthropic
 │   ├── persistent_store.rs  # PersistentStore trait + FilePersistentStore
 │   └── runtime/         # TokenHeap (context segment allocator)
 
-lagent-cli/              # lagent build/run/check/fmt binary
-examples/                # example .la programs
+wispee-cli/              # wispee build/run/check/fmt binary
+examples/                # example .wpee programs
 docs/                    # SPEC.md, ARCHITECTURE.md, ROADMAP.md
 ```
 
@@ -297,8 +297,8 @@ PRs welcome! See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full guide.
 **Quick start:**
 
 ```bash
-git clone https://github.com/lagent-lang/lagent
-cd lagent
+git clone https://github.com/eraflo/Wispee
+cd Wispee
 cargo build
 cargo test
 ```

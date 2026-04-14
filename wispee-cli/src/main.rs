@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! `lagent` command-line toolchain: build, run, check, and fmt `.la` source files.
+//! `wispee` command-line toolchain: build, run, check, and fmt `.wpee` source files.
 
 // Phase 1 — API documentation will be added progressively.
 #![allow(missing_docs)]
@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "lagent", about = "L-Agent language toolchain", version)]
+#[command(name = "wispee", about = "Wispee language toolchain", version)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -17,23 +17,23 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Compile a .la source file to .lbc bytecode (or .lalb library bundle with --lib)
+    /// Compile a .wpee source file to .wbc bytecode (or .walb library bundle with --lib)
     Build {
-        #[arg(help = "Source file (.la); optional when lagent.toml is present")]
+        #[arg(help = "Source file (.wpee); optional when wispee.toml is present")]
         input: Option<PathBuf>,
-        #[arg(short, long, help = "Output file (.lbc or .lalb)")]
+        #[arg(short, long, help = "Output file (.wbc or .walb)")]
         output: Option<PathBuf>,
         #[arg(
             long,
-            help = "Compile as a library (.lalb) instead of an executable (.lbc)"
+            help = "Compile as a library (.walb) instead of an executable (.wbc)"
         )]
         lib: bool,
-        #[arg(long, help = "Library name (overrides lagent.toml)")]
+        #[arg(long, help = "Library name (overrides wispee.toml)")]
         name: Option<String>,
     },
-    /// Compile and immediately execute a .la source file
+    /// Compile and immediately execute a .wpee source file
     Run {
-        #[arg(help = "Source file (.la)")]
+        #[arg(help = "Source file (.wpee)")]
         input: PathBuf,
         #[arg(
             short,
@@ -53,14 +53,14 @@ enum Command {
         #[arg(long, help = "Path to a JSON file for cross-run persistent memory")]
         persist: Option<PathBuf>,
     },
-    /// Check a .la source file for errors without compiling
+    /// Check a .wpee source file for errors without compiling
     Check {
-        #[arg(help = "Source file (.la)")]
+        #[arg(help = "Source file (.wpee)")]
         input: PathBuf,
     },
-    /// Auto-format a .la source file (writes in-place by default)
+    /// Auto-format a .wpee source file (writes in-place by default)
     Fmt {
-        #[arg(help = "Source file (.la)")]
+        #[arg(help = "Source file (.wpee)")]
         input: PathBuf,
         #[arg(
             long,
@@ -80,17 +80,17 @@ fn main() -> Result<()> {
             lib,
             name,
         } => {
-            // Resolve the source file: explicit arg > lagent.toml entry > error.
+            // Resolve the source file: explicit arg > wispee.toml entry > error.
             let (source_path, lib_name) = resolve_build_input(input, name.as_ref(), lib)?;
 
             if lib {
-                let bundle = lagent_compiler::compile_library_file(&source_path, &lib_name)?;
-                let out = output.unwrap_or_else(|| source_path.with_extension("lalb"));
+                let bundle = wispee_compiler::compile_library_file(&source_path, &lib_name)?;
+                let out = output.unwrap_or_else(|| source_path.with_extension("walb"));
                 std::fs::write(&out, &bundle)?;
                 println!("Library {} -> {}", source_path.display(), out.display());
             } else {
-                let bytecode = lagent_compiler::compile_file(&source_path)?;
-                let out = output.unwrap_or_else(|| source_path.with_extension("lbc"));
+                let bytecode = wispee_compiler::compile_file(&source_path)?;
+                let out = output.unwrap_or_else(|| source_path.with_extension("wbc"));
                 std::fs::write(&out, &bytecode)?;
                 println!("Compiled {} -> {}", source_path.display(), out.display());
             }
@@ -102,12 +102,12 @@ fn main() -> Result<()> {
             deterministic,
             persist,
         } => {
-            let bytecode = lagent_compiler::compile_file(&input)?;
+            let bytecode = wispee_compiler::compile_file(&input)?;
             let backend_impl = build_backend(&backend, deterministic)?;
-            let vm = lagent_vm::Vm::new(context, backend_impl);
+            let vm = wispee_vm::Vm::new(context, backend_impl);
 
             let mut vm = if let Some(persist_path) = persist {
-                let store = lagent_vm::persistent_store::FilePersistentStore::open(&persist_path)?;
+                let store = wispee_vm::persistent_store::FilePersistentStore::open(&persist_path)?;
                 vm.with_persistent_store(Box::new(store))
             } else {
                 vm
@@ -116,12 +116,12 @@ fn main() -> Result<()> {
             vm.execute(&bytecode)?;
         }
         Command::Check { input } => {
-            lagent_compiler::compile_file(&input)?;
+            wispee_compiler::compile_file(&input)?;
             println!("ok {} -- no errors", input.display());
         }
         Command::Fmt { input, check } => {
             let source = std::fs::read_to_string(&input)?;
-            let formatted = lagent_compiler::format_source(&source)?;
+            let formatted = wispee_compiler::format_source(&source)?;
 
             if check {
                 if source == formatted {
@@ -140,11 +140,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Resolve the source file path and library name for `lagent build`.
+/// Resolve the source file path and library name for `wispee build`.
 ///
 /// Priority order:
 /// 1. Explicit `--input` CLI argument.
-/// 2. `lagent.toml` in the current directory or any parent (uses `lib.entry` when
+/// 2. `wispee.toml` in the current directory or any parent (uses `lib.entry` when
 ///    `--lib` is set, else `project.entry`).
 fn resolve_build_input(
     input: Option<PathBuf>,
@@ -160,9 +160,9 @@ fn resolve_build_input(
         return Ok((path, lib_name));
     }
 
-    // No explicit input — try lagent.toml.
+    // No explicit input — try wispee.toml.
     let cwd = std::env::current_dir()?;
-    if let Some((config, root)) = lagent_compiler::project::ProjectConfig::find(&cwd) {
+    if let Some((config, root)) = wispee_compiler::project::ProjectConfig::find(&cwd) {
         let (entry, lib_name) = if lib_mode {
             if let Some(lib) = &config.lib {
                 (lib.entry.clone(), lib.name.clone())
@@ -179,21 +179,21 @@ fn resolve_build_input(
         return Ok((path, lib_name));
     }
 
-    anyhow::bail!("no input file specified and no lagent.toml found")
+    anyhow::bail!("no input file specified and no wispee.toml found")
 }
 
 fn build_backend(
     name: &str,
     deterministic: bool,
-) -> Result<Box<dyn lagent_vm::backends::InferenceBackend>> {
+) -> Result<Box<dyn wispee_vm::backends::InferenceBackend>> {
     match name {
         "anthropic" => {
             #[cfg(feature = "backend-remote")]
             {
-                let key = std::env::var("LAGENT_API_KEY").map_err(|_| {
-                    anyhow::anyhow!("LAGENT_API_KEY must be set for --backend anthropic")
+                let key = std::env::var("WISPEE_API_KEY").map_err(|_| {
+                    anyhow::anyhow!("WISPEE_API_KEY must be set for --backend anthropic")
                 })?;
-                Ok(Box::new(lagent_vm::backends::AnthropicBackend::new(
+                Ok(Box::new(wispee_vm::backends::AnthropicBackend::new(
                     key,
                     deterministic,
                 )))
@@ -206,6 +206,6 @@ fn build_backend(
                 )
             }
         }
-        _ => Ok(Box::new(lagent_vm::backends::SimulatedBackend::new("ok"))),
+        _ => Ok(Box::new(wispee_vm::backends::SimulatedBackend::new("ok"))),
     }
 }

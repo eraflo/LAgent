@@ -714,43 +714,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lagent"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "lagent-compiler",
- "lagent-vm",
-]
-
-[[package]]
-name = "lagent-compiler"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bincode",
- "chumsky",
- "logos",
- "serde",
- "thiserror",
- "toml",
-]
-
-[[package]]
-name = "lagent-vm"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bincode",
- "lagent-compiler",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1919,6 +1882,43 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "wispee"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "wispee-compiler",
+ "wispee-vm",
+]
+
+[[package]]
+name = "wispee-compiler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "chumsky",
+ "logos",
+ "serde",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "wispee-vm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "wispee-compiler",
 ]
 
 [[package]]

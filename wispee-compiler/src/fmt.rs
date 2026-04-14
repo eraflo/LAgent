@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! AST pretty-printer for `lagent fmt`.
+//! AST pretty-printer for `wispee fmt`.
 //!
 //! Uses a `Pp<'a, T>` newtype wrapper implementing [`std::fmt::Display`] for
 //! each AST node. The formatter produces normalised 4-space-indented source.

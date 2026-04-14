@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! L-Agent compiler: lexer → parser → semantic analysis → bytecode.
+//! Wispee compiler: lexer → parser → semantic analysis → bytecode.
 //!
 //! The top-level entry points are:
 //! - [`compile`] — compile from a source string (no `use` resolution).
@@ -18,7 +18,7 @@ pub mod semantic;
 
 use anyhow::Result;
 
-/// Compile L-Agent source code to bytecode.
+/// Compile Wispee source code to bytecode.
 ///
 /// `use "path"` declarations are parsed but not resolved (no filesystem access).
 /// Use [`compile_file`] when imports must be expanded.
@@ -35,7 +35,7 @@ pub fn compile(source: &str) -> Result<Vec<u8>> {
     Ok(bytecode)
 }
 
-/// Compile a `.la` source file to bytecode, resolving `use "path"` imports
+/// Compile a `.wpee` source file to bytecode, resolving `use "path"` imports
 /// relative to the directory containing `path`.
 ///
 /// # Errors
@@ -52,10 +52,10 @@ pub fn compile_file(path: &std::path::Path) -> Result<Vec<u8>> {
     Ok(bytecode)
 }
 
-/// Compile a `.la` source file into a `.lalb` library bundle.
+/// Compile a `.wpee` source file into a `.walb` library bundle.
 ///
 /// Only `pub` items are included in the export table.
-/// `lib_name` is used as the bundle name (typically from `lagent.toml`).
+/// `lib_name` is used as the bundle name (typically from `wispee.toml`).
 ///
 /// # Errors
 ///
@@ -71,7 +71,7 @@ pub fn compile_library_file(path: &std::path::Path, lib_name: &str) -> Result<Ve
     Ok(bundle)
 }
 
-/// Format L-Agent source code by round-tripping through the AST.
+/// Format Wispee source code by round-tripping through the AST.
 ///
 /// Returns the normalised source string. Only operates on the given string;
 /// `use` declarations are not resolved.

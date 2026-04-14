@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! L-Agent virtual machine: executes `.lbc` bytecode and manages inference backends.
+//! Wispee virtual machine: executes `.wbc` bytecode and manages inference backends.
 
 // Phase 1 — API documentation and pedantic lint compliance will be added progressively.
 #![allow(

@@ -1,6 +1,6 @@
 [package]
-name = "lagent-compiler"
-description = "L-Agent language compiler: lexer, parser, semantic analysis, and bytecode generation"
+name = "wispee-compiler"
+description = "Wispee language compiler: lexer, parser, semantic analysis, and bytecode generation"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

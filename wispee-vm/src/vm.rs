@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Stack-based L-Agent virtual machine and runtime [`Value`] type.
+//! Stack-based Wispee virtual machine and runtime [`Value`] type.
 
 use crate::backends::InferenceBackend;
 use crate::persistent_store::PersistentStore;
 use crate::runtime::TokenHeap;
 use anyhow::{anyhow, Result};
-use lagent_compiler::codegen::opcodes::{Bytecode, OpCode};
+use wispee_compiler::codegen::opcodes::{Bytecode, OpCode};
 use std::collections::HashMap;
 
 // ── Runtime value type ────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ impl std::fmt::Display for Value {
 
 // ── Virtual Machine ───────────────────────────────────────────────────────────
 
-/// The L-Agent Virtual Machine.
+/// The Wispee Virtual Machine.
 pub struct Vm {
     heap: TokenHeap,
     backend: Box<dyn InferenceBackend>,
@@ -739,7 +739,7 @@ fn main() {
     ctx_free(ctx);
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
 
@@ -787,7 +787,7 @@ fn main() {
     ctx_free(ctx);
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
 
@@ -812,7 +812,7 @@ fn main() {
     ctx_free(ctx);
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
 
@@ -828,7 +828,7 @@ fn main() {
     println(result);
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         let err = make_vm().execute(&bytes).unwrap_err();
         assert!(err.to_string().contains("VerifyFail"));
     }
@@ -843,7 +843,7 @@ fn main() {
     ctx_free(ctx);
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
 
@@ -856,7 +856,7 @@ fn main() {
     }
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
 
@@ -877,7 +877,7 @@ fn main() {
     }
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
 
@@ -890,7 +890,7 @@ fn main() {
     println(r);
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
 
@@ -902,7 +902,7 @@ fn main() {
     println(Counter);
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
 
@@ -937,7 +937,7 @@ fn main() {
     ctx_free(ctx);
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
 
@@ -955,7 +955,7 @@ fn main() {
     apply NonEmpty;
 }
 ";
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         let err = make_vm().execute(&bytes).unwrap_err();
         assert!(
             err.to_string().contains("ConstraintViolation"),
@@ -975,7 +975,7 @@ fn main() {
     println("passed");
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
 
@@ -987,7 +987,7 @@ fn main() {
     println(v);
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         // No persistent store attached — load returns empty string silently.
         make_vm().execute(&bytes).unwrap();
     }
@@ -1002,7 +1002,7 @@ fn main() {
     println(v);
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         let store = InMemoryPersistentStore::new();
         let mut vm = Vm::new(4096, Box::new(SimulatedBackend::new("ok")))
             .with_persistent_store(Box::new(store));
@@ -1020,7 +1020,7 @@ fn main() {
     println(v);
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         let store = InMemoryPersistentStore::new();
         let mut vm = Vm::new(4096, Box::new(SimulatedBackend::new("ok")))
             .with_persistent_store(Box::new(store));
@@ -1040,7 +1040,7 @@ fn main() {
     println("ok");
 }
 "#;
-        let bytes = lagent_compiler::compile(src).unwrap();
+        let bytes = wispee_compiler::compile(src).unwrap();
         make_vm().execute(&bytes).unwrap();
     }
 
@@ -1052,7 +1052,7 @@ fn main() {
     apply Undefined;
 }
 ";
-        let result = lagent_compiler::compile(src);
+        let result = wispee_compiler::compile(src);
         assert!(
             result.is_err(),
             "expected semantic error for unknown constraint"

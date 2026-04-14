@@ -1,24 +1,24 @@
 [package]
-name = "lagent"
-description = "L-Agent CLI: compile, run, and manage .la programs"
+name = "wispee"
+description = "Wispee CLI: compile, run, and manage .wpee programs"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "lagent"
+name = "wispee"
 path = "src/main.rs"
 
 [lints]
 workspace = true
 
 [dependencies]
-lagent-compiler = { path = "../lagent-compiler" }
-lagent-vm = { path = "../lagent-vm" }
+wispee-compiler = { path = "../wispee-compiler" }
+wispee-vm = { path = "../wispee-vm" }
 clap = { workspace = true }
 anyhow = { workspace = true }
 
 [features]
 default = []
-backend-remote = ["lagent-vm/backend-remote"]
+backend-remote = ["wispee-vm/backend-remote"]

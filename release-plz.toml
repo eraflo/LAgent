@@ -23,11 +23,11 @@ changelog_config = "cliff.toml"
 # The CLI binary is the primary release artifact. Its changelog aggregates
 # commits from all three crates.
 [[package]]
-name = "lagent"
-changelog_include = ["lagent", "lagent-compiler", "lagent-vm"]
+name = "wispee"
+changelog_include = ["wispee", "wispee-compiler", "wispee-vm"]
 
 [[package]]
-name = "lagent-compiler"
+name = "wispee-compiler"
 
 [[package]]
-name = "lagent-vm"
+name = "wispee-vm"

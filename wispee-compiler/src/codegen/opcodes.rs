@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-//! L-Agent bytecode instruction set and serialisable [`Bytecode`] container.
+//! Wispee bytecode instruction set and serialisable [`Bytecode`] container.
 
 use serde::{Deserialize, Serialize};
 
-/// L-Agent bytecode instruction set.
+/// Wispee bytecode instruction set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OpCode {
     // ── Literals ──────────────────────────────────────────────────────────────
@@ -196,10 +196,10 @@ pub struct KernelBytecode {
     pub max_retries: u8,
 }
 
-/// A compiled L-Agent program: magic bytes + version + kernel table + instructions.
+/// A compiled Wispee program: magic bytes + version + kernel table + instructions.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Bytecode {
-    /// Magic header — always `b"LAGN"`.
+    /// Magic header — always `b"WSPW"`.
     pub magic: [u8; 4],
     /// Bytecode format version.
     pub version: u16,
@@ -214,7 +214,7 @@ impl Bytecode {
     #[must_use]
     pub fn new(kernels: Vec<KernelBytecode>, instructions: Vec<OpCode>) -> Self {
         Self {
-            magic: *b"LAGN",
+            magic: *b"WSPW",
             version: 1,
             kernels,
             instructions,
@@ -222,9 +222,9 @@ impl Bytecode {
     }
 }
 
-// ── Phase 5: Library Bundle (.lalb) ──────────────────────────────────────────
+// ── Phase 5: Library Bundle (.walb) ──────────────────────────────────────────
 
-/// Kind of an exported item in a `.lalb` library bundle.
+/// Kind of an exported item in a `.walb` library bundle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExportKind {
     /// A callable kernel, spell, or skill.
@@ -235,7 +235,7 @@ pub enum ExportKind {
     Oracle,
 }
 
-/// A single export entry in a `.lalb` library bundle.
+/// A single export entry in a `.walb` library bundle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportEntry {
     /// Exported item name.
@@ -247,17 +247,17 @@ pub struct ExportEntry {
     pub kernel_idx: u16,
 }
 
-/// A precompiled L-Agent library bundle (`.lalb`).
+/// A precompiled Wispee library bundle (`.walb`).
 ///
-/// Contains the same executable bytecode as `.lbc` plus an export table that
+/// Contains the same executable bytecode as `.wbc` plus an export table that
 /// describes which items are visible to importing programs.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LibraryBundle {
-    /// Magic header — always `b"LALB"`.
+    /// Magic header — always `b"WISW"`.
     pub magic: [u8; 4],
     /// Bundle format version.
     pub version: u16,
-    /// Library name (from `lagent.toml` or CLI flag).
+    /// Library name (from `wispee.toml` or CLI flag).
     pub name: String,
     /// The compiled bytecode (kernels + instructions).
     pub bytecode: Bytecode,
@@ -270,7 +270,7 @@ impl LibraryBundle {
     #[must_use]
     pub fn new(name: String, bytecode: Bytecode, exports: Vec<ExportEntry>) -> Self {
         Self {
-            magic: *b"LALB",
+            magic: *b"WISW",
             version: 1,
             name,
             bytecode,

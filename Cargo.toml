@@ -1,17 +1,17 @@
 [workspace]
 members = [
-    "lagent-compiler",
-    "lagent-vm",
-    "lagent-cli",
+    "wispee-compiler",
+    "wispee-vm",
+    "wispee-cli",
 ]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["L-Agent Contributors"]
+authors = ["Wispee Contributors"]
 license = "Apache-2.0"
-repository = "https://github.com/lagent-lang/lagent"
+repository = "https://github.com/eraflo/Wispee"
 
 [workspace.dependencies]
 logos = "0.14"

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Recursive-descent parser for L-Agent source files.
+//! Recursive-descent parser for Wispee source files.
 //!
 //! Converts a flat [`Vec<Token>`](crate::lexer::Token) produced by the lexer
 //! into a typed [`Vec<Item>`](crate::parser::ast::Item) abstract syntax tree.

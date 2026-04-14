@@ -1,6 +1,6 @@
 [package]
-name = "lagent-vm"
-description = "L-Agent virtual machine and runtime: executes .lbc bytecode and manages inference backends"
+name = "wispee-vm"
+description = "Wispee virtual machine and runtime: executes .wbc bytecode and manages inference backends"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -16,11 +16,11 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 bincode = "1"
 
-[dependencies.lagent-compiler]
-path = "../lagent-compiler"
+[dependencies.wispee-compiler]
+path = "../wispee-compiler"
 
 [dev-dependencies]
-lagent-compiler = { path = "../lagent-compiler" }
+wispee-compiler = { path = "../wispee-compiler" }
 
 [features]
 default = ["backend-simulated"]

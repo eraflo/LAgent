@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-//! `lagent.toml` project manifest parsing.
+//! `wispee.toml` project manifest parsing.
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-/// Top-level `lagent.toml` configuration.
+/// Top-level `wispee.toml` configuration.
 #[derive(Debug, Deserialize)]
 pub struct ProjectConfig {
     /// `[project]` section — always required.
@@ -13,7 +13,7 @@ pub struct ProjectConfig {
     pub lib: Option<LibConfig>,
 }
 
-/// `[project]` section of `lagent.toml`.
+/// `[project]` section of `wispee.toml`.
 #[derive(Debug, Deserialize)]
 pub struct ProjectMeta {
     /// Project name (used as the library bundle name when `--lib` is set).
@@ -24,17 +24,17 @@ pub struct ProjectMeta {
     pub entry: String,
 }
 
-/// `[lib]` section of `lagent.toml` — declares a library crate.
+/// `[lib]` section of `wispee.toml` — declares a library crate.
 #[derive(Debug, Deserialize)]
 pub struct LibConfig {
     /// Library entry-point source file (relative to the project root).
     pub entry: String,
-    /// Library bundle name (used as the `.lalb` filename stem).
+    /// Library bundle name (used as the `.walb` filename stem).
     pub name: String,
 }
 
 impl ProjectConfig {
-    /// Load and parse a `lagent.toml` file.
+    /// Load and parse a `wispee.toml` file.
     ///
     /// # Errors
     ///
@@ -45,14 +45,14 @@ impl ProjectConfig {
         Ok(config)
     }
 
-    /// Walk up from `start_dir` looking for a `lagent.toml`.
+    /// Walk up from `start_dir` looking for a `wispee.toml`.
     ///
     /// Returns `(config, project_root)` on success, or `None` if not found.
     #[must_use]
     pub fn find(start_dir: &Path) -> Option<(Self, PathBuf)> {
         let mut dir = start_dir.to_path_buf();
         loop {
-            let candidate = dir.join("lagent.toml");
+            let candidate = dir.join("wispee.toml");
             if candidate.exists() {
                 if let Ok(cfg) = Self::load(&candidate) {
                     return Some((cfg, dir));

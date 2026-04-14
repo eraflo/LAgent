@@ -4,7 +4,7 @@
 use super::InferenceBackend;
 use anyhow::{anyhow, Context, Result};
 
-/// Anthropic Claude backend. Requires a valid `LAGENT_API_KEY` and the
+/// Anthropic Claude backend. Requires a valid `WISPEE_API_KEY` and the
 /// `backend-remote` Cargo feature to be enabled.
 pub struct AnthropicBackend {
     api_key: String,
@@ -16,7 +16,7 @@ pub struct AnthropicBackend {
 impl AnthropicBackend {
     /// Create a new backend.
     ///
-    /// * `api_key` — Anthropic API key (from `LAGENT_API_KEY`).
+    /// * `api_key` — Anthropic API key (from `WISPEE_API_KEY`).
     /// * `deterministic` — when `true`, sets temperature to `0.0`.
     pub fn new(api_key: impl Into<String>, deterministic: bool) -> Self {
         Self {

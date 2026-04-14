@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Integration tests for the L-Agent compiler pipeline.
+//! Integration tests for the Wispee compiler pipeline.
 
-use lagent_compiler::compile;
+use wispee_compiler::compile;
 
 /// An empty source file must compile without error.
 #[test]
@@ -9,15 +9,15 @@ fn compiles_empty_source() {
     assert!(compile("").is_ok());
 }
 
-/// The first 4 bytes of any compiled output must be the `LAGN` magic header.
+/// The first 4 bytes of any compiled output must be the `WSPW` magic header.
 #[test]
-fn compile_produces_lagn_magic_header() {
+fn compile_produces_wspw_magic_header() {
     let bytecode = compile("").expect("compilation failed");
     assert!(
         bytecode.len() >= 4,
         "bytecode too short to contain magic header"
     );
-    assert_eq!(&bytecode[0..4], b"LAGN", "missing LAGN magic header");
+    assert_eq!(&bytecode[0..4], b"WSPW", "missing WSPW magic header");
 }
 
 /// Whitespace-only source should behave identically to empty source.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Abstract syntax tree node definitions for the L-Agent language.
+//! Abstract syntax tree node definitions for the Wispee language.
 
 /// Top-level items in a .la source file.
 #[derive(Debug, Clone)]

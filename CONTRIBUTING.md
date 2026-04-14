@@ -1,14 +1,14 @@
-# Contributing to L-Agent
+# Contributing to Wispee
 
-Thank you for your interest in L-Agent!
+Thank you for your interest in Wispee!
 
 ## Development Setup
 
 Prerequisites: Rust 1.78+ (install via [rustup](https://rustup.rs)).
 
 ```bash
-git clone https://github.com/lagent-lang/lagent
-cd lagent
+git clone https://github.com/eraflo/Wispee
+cd Wispee
 cargo build
 cargo test
 ```
@@ -55,12 +55,12 @@ cargo test --workspace --all-features
 - Tous les items publics (`pub`) **doivent** avoir un doc comment (`///`).
 - Pas de `unwrap()` ni de `expect()` dans le code de production — utiliser `?` avec `anyhow`/`thiserror`.
 - Toute nouvelle fonctionnalité du langage requiert les 7 étapes suivantes :
-  1. **Token** dans `lagent-compiler/src/lexer/mod.rs`
-  2. **Nœud AST** dans `lagent-compiler/src/parser/ast.rs`
-  3. **Règle parser** dans `lagent-compiler/src/parser/mod.rs`
-  4. **Validation sémantique** dans `lagent-compiler/src/semantic/mod.rs`
-  5. **`OpCode`** dans `lagent-compiler/src/codegen/opcodes.rs` + émission dans `codegen/mod.rs`
-  6. **Dispatch VM** dans `lagent-vm/src/vm.rs`
+  1. **Token** dans `wispee-compiler/src/lexer/mod.rs`
+  2. **Nœud AST** dans `wispee-compiler/src/parser/ast.rs`
+  3. **Règle parser** dans `wispee-compiler/src/parser/mod.rs`
+  4. **Validation sémantique** dans `wispee-compiler/src/semantic/mod.rs`
+  5. **`OpCode`** dans `wispee-compiler/src/codegen/opcodes.rs` + émission dans `codegen/mod.rs`
+  6. **Dispatch VM** dans `wispee-vm/src/vm.rs`
   7. **Tests** : unitaires inline + test d'intégration dans `tests/`
 
 ## Branches & Release Flow
