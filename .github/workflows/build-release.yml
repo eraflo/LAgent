@@ -45,7 +45,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -83,7 +83,7 @@ jobs:
           "ARTIFACT=$artifact" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload artifact to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ env.ARTIFACT }}
           tag_name: ${{ github.ref_name }}
